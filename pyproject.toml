@@ -1,0 +1,60 @@
+# pyproject.toml — tool configuration only.
+# The [project] and [build-system] sections are added in Section 3 of the build
+# (see docs/spec/section-03-bootstrap.md). Do not remove the [tool.*] sections
+# below when Section 3 extends this file.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "arg_db", "vendor", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import ordering)
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "RUF",  # ruff-specific rules
+    "SIM",  # flake8-simplify
+    "C4",   # flake8-comprehensions
+    "PTH",  # flake8-use-pathlib
+]
+ignore = [
+    "E501",  # line too long — the formatter handles it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]  # allow `assert False` in tests
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.11"
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_equality = true
+check_untyped_defs = true
+# Pragmatic: LlamaIndex / Kuzu / Chroma have uneven third-party stubs.
+ignore_missing_imports = true
+disallow_untyped_defs = false
+exclude = ["tests/", "scripts/", "\\.venv/", "build/", "dist/"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "integration: integration tests (require local services)",
+    "e2e: end-to-end tests (require Ollama running with llama3.3 + nomic-embed-text)",
+]

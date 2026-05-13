@@ -40,6 +40,40 @@ bad state, delete `.venv/` and re-run `scripts/bootstrap.sh`.
 
 ---
 
+### Tooling & quality gates
+
+The repo ships with quality gates wired up before any `arg/` code is written, so
+the build runs against a consistent standard from line 1.
+
+| Layer | Tool | Config | Runs in |
+|---|---|---|---|
+| Lint + format | `ruff` | `pyproject.toml` `[tool.ruff]` | pre-commit + CI |
+| Type checking | `mypy` | `pyproject.toml` `[tool.mypy]` | pre-commit + CI (once `arg/` exists) |
+| Tests | `pytest` | `pyproject.toml` `[tool.pytest.ini_options]` | CI (once tests exist) |
+| Pre-commit | `pre-commit` | `.pre-commit-config.yaml` | every `git commit` |
+| CI | GitHub Actions | `.github/workflows/test.yml` | every push + PR |
+| Dependency updates | Dependabot | `.github/dependabot.yml` | weekly pip · monthly GH Actions |
+
+**One-time install** (inside the activated `.venv/`):
+
+```bash
+pip install ruff mypy pytest pytest-asyncio pre-commit
+pre-commit install
+pre-commit autoupdate         # bump hook revs to latest
+pre-commit run --all-files    # baseline sweep
+```
+
+Once installed, hooks run on every `git commit`. **Never bypass with `--no-verify`**
+— see "When to intervene" below.
+
+**Branch protection on `main`** is the structural complement to the per-section
+branch flow. Configure in GitHub Settings → Branches → Add rule for `main`:
+- ✅ Require status checks to pass before merging → select `ci` workflow
+- ✅ Require branches to be up to date before merging
+- (Solo project: PR review requirement can stay off; per-section approval already gates merges)
+
+---
+
 ### Starting the build
 
 From your project root (the directory containing this file), run:

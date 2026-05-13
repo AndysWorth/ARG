@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy pytest pytest-asyncio
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: Install project (if pyproject.toml has [project])
+        run: |
+          if grep -q "^\[project\]" pyproject.toml 2>/dev/null; then
+            pip install -e .
+          else
+            echo "::notice::pyproject.toml has no [project] section yet (Section 3); skipping editable install."
+          fi
+
+      - name: mypy
+        run: |
+          if find arg -name "*.py" 2>/dev/null | grep -q .; then
+            mypy arg/
+          else
+            echo "::notice::No Python files in arg/ yet; skipping mypy."
+          fi
+
+      - name: Unit tests
+        run: |
+          if find tests/unit -name "test_*.py" 2>/dev/null | grep -q .; then
+            pytest tests/unit/ -v
+          else
+            echo "::notice::No unit tests yet; skipping pytest."
+          fi

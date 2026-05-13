@@ -4,7 +4,10 @@
 
 ### What Claude will produce:
 - `scripts/bootstrap.sh` — one-time setup script (see rules below)
-- `pyproject.toml` — all dependencies pinned to exact versions
+- `pyproject.toml` — **extend** the existing file (which already holds `[tool.ruff]`,
+  `[tool.mypy]`, `[tool.pytest.ini_options]`) by adding the `[project]` and
+  `[build-system]` sections plus a `[project.optional-dependencies]` group for dev
+  tools. **Do not overwrite the existing `[tool.*]` sections.**
 - `.env.example` — tunables with defaults
 - `README.md` — full project documentation with the sections below
 
@@ -155,11 +158,26 @@ dependencies = [
     "scikit-learn>=1.4",      # k-means; local, no network
     # Sparse retrieval
     "rank-bm25>=0.2.2",       # BM25 keyword search; pure Python; no server
-    # Testing
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 ```
+
+**Note:** `[tool.ruff]`, `[tool.mypy]`, and `[tool.pytest.ini_options]` already exist
+in `pyproject.toml` (added before Section 3). Section 3 only adds `[project]`,
+`[project.optional-dependencies]`, and `[build-system]` — it must not remove or
+rewrite the existing `[tool.*]` sections.
 
 **System dependency (installed by bootstrap.sh via Homebrew):**
 ```bash
