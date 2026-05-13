@@ -50,8 +50,8 @@ the build runs against a consistent standard from line 1.
 | Lint + format | `ruff` | `pyproject.toml` `[tool.ruff]` | pre-commit + CI |
 | Type checking | `mypy` | `pyproject.toml` `[tool.mypy]` | pre-commit + CI (once `arg/` exists) |
 | Tests | `pytest` | `pyproject.toml` `[tool.pytest.ini_options]` | CI (once tests exist) |
-| Pre-commit | `pre-commit` | `.pre-commit-config.yaml` | every `git commit` |
-| CI | GitHub Actions | `.github/workflows/test.yml` | every push + PR |
+| Pre-commit | `pre-commit` | `.pre-commit-config.yaml` | every `git commit` + CI |
+| CI | GitHub Actions | `.github/workflows/test.yml` | every push + PR (parallel jobs: `pre-commit`, `ci`) |
 | Dependency updates | Dependabot | `.github/dependabot.yml` | weekly pip · monthly GH Actions |
 
 **One-time install** (inside the activated `.venv/`):

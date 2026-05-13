@@ -221,6 +221,9 @@ __marimo__/
 
 # =============================================================================
 # ARG — Archivist RAG Graph
+# Project-specific ignores. Generic Python / venv / pytest / coverage / mypy /
+# ruff / Jupyter-checkpoint entries are already covered by the upstream Python
+# template above — do not re-add them here.
 # =============================================================================
 
 # --- ARG runtime data (never commit index data or logs) ---
@@ -231,50 +234,21 @@ config_hash.json
 summaries/
 debug_traces/
 eval/
+logs/
+arg.log
 
-# --- Python ---
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-eggs/
-parts/
-var/
-sdist/
-wheels/
-pip-wheel-metadata/
-.installed.cfg
-MANIFEST
-
-# --- Virtual environments ---
-.venv/
-venv/
-env/
-ENV/
-.env
+# --- Env files (.env is covered above; whitelist the example template) ---
 .env.*
-!.env.example              # keep the example template
+!.env.example
 
-# --- Pytest / testing ---
-.pytest_cache/
-.cache/
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-nosetests.xml
+# --- Jupyter (don't commit notebooks; .ipynb_checkpoints covered above) ---
+*.ipynb
+
+# --- Pytest extras not in the template ---
 test-results/
 
-# --- Jupyter (if used for eval analysis) ---
-.ipynb_checkpoints/
-*.ipynb
+# --- Pip wheel metadata (legacy name, kept for safety) ---
+pip-wheel-metadata/
 
 # --- macOS ---
 .DS_Store
@@ -291,11 +265,9 @@ eject.command
 DerivedData/
 
 # --- Node / D3 (bootstrap downloads d3.min.js — commit it) ---
+# arg/static/d3.min.js is intentionally NOT ignored.
 node_modules/
 npm-debug.log*
-
-# --- Static assets: commit d3.min.js (downloaded once at bootstrap) ---
-# arg/static/d3.min.js is intentionally NOT ignored
 
 # --- Editors ---
 .vscode/
@@ -304,11 +276,6 @@ npm-debug.log*
 *.swo
 *~
 .vim/
-
-# --- Logs ---
-*.log
-logs/
-arg.log
 
 # --- Ollama (models live in ~/.ollama, not the project) ---
 *.gguf
