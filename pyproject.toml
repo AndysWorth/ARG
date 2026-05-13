@@ -1,7 +1,55 @@
-# pyproject.toml — tool configuration only.
-# The [project] and [build-system] sections are added in Section 3 of the build
-# (see docs/spec/section-03-bootstrap.md). Do not remove the [tool.*] sections
-# below when Section 3 extends this file.
+[project]
+name = "arg"
+version = "0.1.0"
+description = "Archivist RAG Graph — a fully local, knowledge-graph-augmented RAG for HTML and PDF documentation."
+requires-python = ">=3.11"
+readme = "README.md"
+license = { file = "LICENSE" }
+dependencies = [
+    # RAG framework — exact-pinned to a verified compatible set (Section 3).
+    "llama-index-core==0.14.21",
+    "llama-index-vector-stores-chroma==0.5.5",
+    "llama-index-graph-stores-kuzu==0.9.1",
+    "llama-index-llms-ollama==0.10.1",
+    "llama-index-embeddings-ollama==0.9.0",
+    # Stores
+    "chromadb>=0.5",
+    "kuzu>=0.6",
+    # Parsing
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pdfplumber>=0.11",
+    "pymupdf>=1.24",
+    # File watching
+    "watchdog>=4.0",
+    # Web UI
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    # Utilities
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    # DCI clustering
+    "scikit-learn>=1.4",
+    # Sparse retrieval
+    "rank-bm25>=0.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["arg*"]
+exclude = ["tests*", "scripts*", "docs*", "vendor*", "arg_db*"]
 
 [tool.ruff]
 line-length = 100
