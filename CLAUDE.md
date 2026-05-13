@@ -93,14 +93,30 @@ Claude Code handles the mechanics. Your role is:
 ### Section-by-section flow (what Claude Code does automatically)
 
 For each section, Claude Code will:
-1. Re-read the relevant section spec from `docs/spec/`
-2. Read any existing files it will import from
-3. Write all specified files to disk
-4. Run the section's unit tests
-5. Fix any test failures (iterating until tests pass)
-6. Run the locality check: `grep -rn "requests\.\|httpx\.get\|http://" arg/ --include="*.py" | grep -v "localhost\|127.0.0.1\|11434\|test_"`
-7. Commit: `git add -A && git commit -m "Section N complete: [files] — tests passing"`
-8. Report completion and wait for your `"Continue"` before starting the next section
+1. Create a fresh branch off `main`: `git switch main && git pull && git switch -c section-N-<short-name>` (e.g. `section-3-bootstrap`)
+2. Re-read the relevant section spec from `docs/spec/`
+3. Read any existing files it will import from
+4. Write all specified files to disk
+5. Run the section's unit tests
+6. Fix any test failures (iterating until tests pass). Never bypass pre-commit hooks or signing with `--no-verify` / `--no-gpg-sign` — investigate failures and fix the root cause.
+7. Run the locality check: `grep -rn "requests\.\|httpx\.get\|http://" arg/ --include="*.py" | grep -v "localhost\|127.0.0.1\|11434\|test_"`
+8. Stage **explicit paths only** (never `git add -A` / `git add .`), commit with **Conventional Commits** format, and push the branch:
+   ```bash
+   # Stage only the paths this section touched — pick from these as relevant:
+   git add arg/ tests/ scripts/ docs/ pyproject.toml .env.example README.md
+   # type ∈ {feat, fix, test, chore, docs, refactor}; scope = section package (crawler, indexer, retriever, ...)
+   git commit -m "feat(section-N): <short summary of what landed>"
+   git push -u origin section-N-<short-name>
+   ```
+9. Report the branch name, test summary, and commit SHA, then wait for your `"Continue"`.
+10. Once you say `"Continue"`, fast-forward merge into `main` and clean up:
+    ```bash
+    git switch main
+    git merge --ff-only section-N-<short-name>
+    git push
+    git branch -d section-N-<short-name>
+    git push origin --delete section-N-<short-name>
+    ```
 
 ---
 
@@ -155,24 +171,41 @@ Intervene if Claude Code:
   → Say: `"We use [specified library] for this. Do not substitute alternatives."`
 - **Makes a network call** outside of Ollama
   → Say: `"This violates the locality guarantee. Remove all outbound network calls."`
+- **Bypasses pre-commit hooks or signing** with `--no-verify` / `--no-gpg-sign`
+  → Say: `"Do not bypass hooks. Fix the underlying issue and create a new commit."`
+- **Uses `git add -A` / `git add .` or `git reset --hard`** instead of explicit paths and branch-abandon recovery
+  → Say: `"Stage explicit paths only. For recovery, delete the section branch rather than reset --hard."`
 
 ---
 
 ### If the build goes wrong
 
+Because each section is built on its own branch, recovery is non-destructive — abandon
+the section branch and start over from `main`. Avoid `git reset --hard`; it silently
+discards uncommitted work and can't be undone.
+
 ```bash
-# See what's changed since the last clean commit
-git diff HEAD
+# See what the section branch added vs. main
+git diff main...HEAD
 
-# Discard everything since last commit and retry the section
-git checkout -- .
+# (Optional) save in-progress changes you might want to inspect later
+git stash push -m "section-N WIP"
 
-# Or go back further
-git log --oneline -10   # find the commit to restore
-git reset --hard <hash>
+# Abandon the section branch and return to a clean main
+git switch main
+git branch -D section-N-<short-name>                # delete local
+git push origin --delete section-N-<short-name>     # delete remote (if pushed)
+
+# Discard any stray uncommitted edits on main (use `git restore`, not `checkout --`)
+git restore .
+
+# Rare case: a bad section already landed on main. Revert it, don't reset —
+# `git revert` keeps remote history sane.
+git revert <bad-commit-sha>
+git push
 ```
 
-Tell Claude Code: `"Reset to the last clean commit and retry Section N."`
+Tell Claude Code: `"Abandon the section-N branch and retry Section N from main."`
 
 ---
 
@@ -517,6 +550,10 @@ python scripts/index_docs.py index --docs /path/to/your/docs --db ./arg_db
 # Start the web UI
 python scripts/index_docs.py serve --db ./arg_db
 # Open http://localhost:8000
+
+# Tag the stable starting point (only once post-build eval passes)
+git tag -a v0.1.0 -m "Initial release: full RAG + DCI pipeline; all tests and eval passing"
+git push origin v0.1.0
 ```
 
 ## 19. Operational Notes
