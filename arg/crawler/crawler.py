@@ -50,6 +50,10 @@ _TEXT_SUFFIXES: frozenset[str] = frozenset({".txt", ".md", ".markdown"})
 _INDEXABLE_SUFFIXES: frozenset[str] = _HTML_SUFFIXES | _PDF_SUFFIXES | _TEXT_SUFFIXES
 _SKIP_SCHEMES: frozenset[str] = frozenset({"mailto", "javascript", "tel", "ftp", "http", "https"})
 
+# How often the crawl loop emits a "still working" heartbeat. Tuned to
+# fire often enough on small corpora and not too often on big ones.
+_PROGRESS_EVERY = 25
+
 
 def normalise_href(href: str, source_path: Path, docs_root: Path) -> Path | None:
     """Resolve a raw ``<a href>`` to an absolute Path inside ``docs_root``.
@@ -139,8 +143,15 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
     if not docs_root.is_dir():
         raise NotADirectoryError(f"docs_root is not a directory: {docs_root}")
 
+    logger.info("crawler: walking %s", docs_root)
+
     seen: set[Path] = set()
     queue: deque[Path] = deque()
+    # Every ``_PROGRESS_EVERY`` extracted docs we log a heartbeat so
+    # ``tail -f arg.log`` reflects the crawl-phase progress on big
+    # corpora. The indexer's own per-doc lines kick in once crawl
+    # completes.
+    extracted = 0
 
     index = docs_root / "index.html"
     if index.is_file():
@@ -162,7 +173,12 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
         doc.metadata["links_to"] = _resolve_links(
             doc.metadata.get("links_to", []), path, docs_root, seen, queue
         )
+        extracted += 1
+        if extracted % _PROGRESS_EVERY == 0:
+            logger.info("crawler: %d files extracted so far (link phase)", extracted)
         yield doc
+
+    logger.info("crawler: link phase complete (%d docs); scanning directory tree", extracted)
 
     # Directory walk for files unreachable from index.html.
     for path in sorted(docs_root.rglob("*")):
@@ -180,10 +196,15 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
         doc = _extract_for_path(resolved, config)
         if doc is None:
             continue
+        extracted += 1
+        if extracted % _PROGRESS_EVERY == 0:
+            logger.info("crawler: %d files extracted so far (dirwalk phase)", extracted)
         doc.metadata["links_to"] = _resolve_links(
             doc.metadata.get("links_to", []), resolved, docs_root, seen, queue
         )
         yield doc
+
+    logger.info("crawler: complete (%d total documents extracted)", extracted)
 
 
 def _extract_for_path(path: Path, config: ARGConfig) -> Document | None:

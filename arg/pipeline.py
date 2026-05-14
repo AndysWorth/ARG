@@ -284,8 +284,20 @@ class ARGPipeline:
         """Crawl ``docs_root`` and (re-)index every document. Cluster cache
         is invalidated so the next clustering call recomputes."""
         with self._lock:
+            logger.info("pipeline.index: starting crawl of %s", self.config.docs_root)
             documents = list(crawl(self.config.docs_root, self.config))
+            logger.info(
+                "pipeline.index: crawl yielded %d documents; handing off to indexer",
+                len(documents),
+            )
             stats = self.indexer.index(documents)
+            logger.info(
+                "pipeline.index: indexer done (indexed=%d, skipped=%d, chunks=%d); "
+                "reloading retriever + invalidating cluster cache",
+                stats.documents_indexed,
+                stats.documents_skipped,
+                stats.chunks_written,
+            )
             self.retriever.reload()
             self.explorer.invalidate_cluster_cache()
             self._write_schema_hash()
