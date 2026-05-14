@@ -809,8 +809,11 @@ def extract_pdf_metadata(path: Path, config: ARGConfig) -> dict[str, Any] | None
         # Internal links: pymupdf gives each annotation a kind. URI links go
         # straight into the link graph; named-destination links (kind == LINK_GOTO)
         # stay inside the PDF and are not useful for cross-doc traversal.
+        # Iterate by index — pymupdf's type stubs do not expose Document.__iter__,
+        # so `for page in doc:` upsets CI mypy even though it works at runtime.
         links_to: list[str] = []
-        for page in doc:
+        for page_index in range(doc.page_count):
+            page = doc[page_index]
             for link in page.get_links():
                 uri = link.get("uri")
                 if uri:

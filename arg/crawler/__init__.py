@@ -9,9 +9,19 @@ from arg.crawler.extractors import (
     extract_pdf_metadata,
     extract_pdf_to_document,
 )
+from arg.crawler.watcher import (
+    EVENT_CREATED,
+    EVENT_DELETED,
+    EVENT_MODIFIED,
+    DocsWatcher,
+)
 
 __all__ = [
     "DEFAULT_STRIP_SELECTORS",
+    "EVENT_CREATED",
+    "EVENT_DELETED",
+    "EVENT_MODIFIED",
+    "DocsWatcher",
     "Document",
     "crawl",
     "extract_html",
