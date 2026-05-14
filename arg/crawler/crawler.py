@@ -97,6 +97,13 @@ def normalise_href(href: str, source_path: Path, docs_root: Path) -> Path | None
     if resolved.suffix.lower() not in _INDEXABLE_SUFFIXES:
         return None
 
+    # Dangling links: the href resolves to a path inside docs_root but no
+    # file exists there. Real corpora routinely carry stale links; treat
+    # them as graph edges that simply don't have a target Document.
+    if not resolved.is_file():
+        logger.warning("crawler: dangling link from %s -> %s", source_path, resolved)
+        return None
+
     return resolved
 
 

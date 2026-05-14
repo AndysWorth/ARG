@@ -100,6 +100,23 @@ def test_normalise_href_strips_fragment(docs_root):
     assert result == (docs_root / "page.html").resolve()
 
 
+def test_normalise_href_rejects_dangling_link(docs_root, caplog):
+    """A link target inside docs_root but missing on disk must be skipped.
+
+    Real corpora routinely have stale links to deleted pages; the crawler
+    must surface a warning and continue rather than crash on the missing
+    file later during extraction.
+    """
+    src = docs_root / "index.html"
+    src.touch()
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        result = normalise_href("vanished.html", src.resolve(), docs_root.resolve())
+    assert result is None
+    assert any("dangling link" in rec.message for rec in caplog.records)
+
+
 def test_normalise_href_url_decodes_percent_escapes(docs_root):
     """Filenames with spaces / apostrophes round-trip through URL-encoded hrefs.
 
