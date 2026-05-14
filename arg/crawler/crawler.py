@@ -13,10 +13,9 @@ turns a docs root directory into an ordered stream of `Document` objects:
      (A → B → A) don't loop.
   4. Caps recursion via ``config.max_file_depth``.
 
-In the HTML-only pass, PDF files are recorded as graph edges (their resolved
-paths appear in the ``links_to`` lists of HTML documents that linked to them)
-but the crawler does not yet yield a `Document` for them — that lands when the
-PDF extractor is implemented in pass 2 of Section 5.
+PDF files are also yielded as Documents (since Section 5 pass 2). Encrypted
+or unreadable PDFs are skipped silently after a warning is logged — they do
+not abort the crawl.
 
 Locality
 --------
@@ -36,7 +35,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from arg.config import ARGConfig
-from arg.crawler.extractors import Document, extract_html
+from arg.crawler.extractors import Document, extract_html, extract_pdf_to_document
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +109,13 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
     """Walk ``docs_root`` and yield `Document` objects.
 
     Yields HTML documents in BFS order starting from ``index.html`` (if it
-    exists), then any unreached HTML files discovered by directory walk in
-    sorted order. ``links_to`` in each Document's metadata is normalised to a
-    list of absolute path strings — non-followable hrefs are dropped.
+    exists), interleaving PDF documents at the point they are first reached
+    via a link, then any unreached indexable files discovered by directory
+    walk in sorted order. ``links_to`` in each Document's metadata is
+    normalised to a list of absolute path strings — non-followable hrefs
+    are dropped.
 
-    Pass 1: PDF files are not yielded as Documents; they appear only as edges
-    in other documents' ``links_to``.
+    Encrypted or unreadable PDFs are skipped silently after a warning.
     """
     docs_root = docs_root.resolve()
     if not docs_root.is_dir():
@@ -138,20 +138,20 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
             logger.debug("crawler: skipping %s (depth exceeds max_file_depth)", path)
             continue
 
-        if path.suffix.lower() in _HTML_SUFFIXES:
-            doc = extract_html(path, config)
-            doc.metadata["links_to"] = _resolve_links(
-                doc.metadata.get("links_to", []), path, docs_root, seen, queue
-            )
-            yield doc
-        # PDF: edges recorded by HTML extractors; standalone yield deferred to pass 2.
+        doc = _extract_for_path(path, config)
+        if doc is None:
+            continue
+        doc.metadata["links_to"] = _resolve_links(
+            doc.metadata.get("links_to", []), path, docs_root, seen, queue
+        )
+        yield doc
 
     # Directory walk for files unreachable from index.html.
     for path in sorted(docs_root.rglob("*")):
         if not path.is_file():
             continue
         suffix = path.suffix.lower()
-        if suffix not in _HTML_SUFFIXES:
+        if suffix not in _INDEXABLE_SUFFIXES:
             continue
         resolved = path.resolve()
         if resolved in seen:
@@ -159,11 +159,22 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
         if _relative_dir_depth(resolved, docs_root) > config.max_file_depth:
             continue
         seen.add(resolved)
-        doc = extract_html(resolved, config)
+        doc = _extract_for_path(resolved, config)
+        if doc is None:
+            continue
         doc.metadata["links_to"] = _resolve_links(
             doc.metadata.get("links_to", []), resolved, docs_root, seen, queue
         )
         yield doc
+
+
+def _extract_for_path(path: Path, config: ARGConfig) -> Document | None:
+    suffix = path.suffix.lower()
+    if suffix in _HTML_SUFFIXES:
+        return extract_html(path, config)
+    if suffix == ".pdf":
+        return extract_pdf_to_document(path, config)
+    return None
 
 
 def _resolve_links(

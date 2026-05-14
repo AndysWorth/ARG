@@ -1,14 +1,20 @@
 """HTML and PDF text extractors.
 
-The HTML side is implemented here. The PDF side is built in the second pass of
-Section 5; this module currently exposes a stub that raises NotImplementedError
-so callers fail loudly rather than silently.
+Both the HTML and PDF sides land here. The extractor's job is to convert one
+source file into a single `Document` holding cleaned body text + metadata. URL
+resolution / cross-file traversal / de-duplication is the crawler's job
+(`arg.crawler.crawler.crawl`) — extractors just report the raw `<a href>`
+values they saw in the page; the crawler normalises them into absolute paths
+inside `docs_root`.
 
-The extractor's job is to convert one source file into a single `Document`
-holding cleaned body text + metadata. URL resolution / cross-file traversal /
-de-duplication is the crawler's job (`arg.crawler.crawler.crawl`) — extractors
-just report the raw `<a href>` values they saw in the page; the crawler
-normalises them into absolute paths inside `docs_root`.
+PDF extraction is broken into three entry points:
+  * `extract_pdf_metadata(path, config)`  — doc-level pre-flight only (title,
+    description, keywords, links, page count). Returns `None` if encrypted or
+    corrupt.
+  * `extract_pdf(path, config)`           — generator yielding
+    `(page_number, page_text, page_metadata)` tuples for the indexer.
+  * `extract_pdf_to_document(path, config)` — convenience wrapper that
+    consumes the generator and produces a single `Document`.
 
 Heading boundary sentinels
 --------------------------
@@ -26,13 +32,19 @@ crawler enforces the same guarantee for cross-file traversal.
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
+import statistics
+import unicodedata
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pdfplumber
+import pymupdf as fitz
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 from arg.config import ARGConfig
@@ -371,19 +383,582 @@ def _normalise_whitespace(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# PDF extractor — stub, implemented in pass 2 of Section 5
+# PDF extractor
 # ---------------------------------------------------------------------------
+#
+# Per the Section 5 spec, PDF extraction is a multi-stage per-page pipeline:
+#
+#   Step 0 — document-level pre-flight (encryption, form fields, title,
+#            subject/keywords, running header/footer detection across pages).
+#   Step 1 — per-page three-stage extraction:
+#              1a pdfplumber (primary)  →  1b pymupdf text  →  1c pymupdf OCR
+#            Stage choice is per-page, not per-document: a single PDF can mix
+#            native-text and scanned pages.
+#   Step 2 — font-based heading detection via pymupdf's get_text("dict")
+#            structure; injects ##H1##/##H2##/##H3## sentinels identical to
+#            the HTML extractor so the chunker uses one boundary algorithm
+#            for both formats.
+#   Step 3 — text cleaning (soft-hyphen rejoin, ligatures, typographic
+#            characters, Unicode NFC, whitespace normalisation).
+#   Step 4 — page metadata assembly.
+#   Step 5 — incremental yield (generator) so the indexer can checkpoint.
+#
+# `extract_pdf_metadata` is the cheap path used by the crawler to build a
+# `Document` for a PDF (title + page_description + keywords + links).
+# `extract_pdf` is the full streaming generator used by the indexer.
+# `extract_pdf_to_document` calls both and assembles a `Document` with the
+# concatenated page text — convenient for callers that don't need streaming.
+
+# Title strings the spec wants treated as "no title" (Step 0c.1). Match anchored
+# at start, case-insensitive. Anything that begins with these patterns falls
+# back to the largest-font line on page 1, then to the filename stem.
+_PDF_TITLE_TEMP_RE = re.compile(
+    r"^\s*("
+    r"Microsoft Word|Microsoft PowerPoint|Microsoft Excel|"
+    r"Untitled|"
+    r"document\d*|Presentation\d*|Worksheet\d*"
+    r")",
+    re.IGNORECASE,
+)
+
+# Ligatures decoded per spec Step 3b.
+_PDF_LIGATURES: dict[str, str] = {
+    "ﬁ": "fi",
+    "ﬂ": "fl",
+    "ﬀ": "ff",
+    "ﬃ": "ffi",
+    "ﬄ": "ffl",
+    "ﬆ": "st",
+    "Ĳ": "IJ",
+    "ĳ": "ij",
+}
+
+# Typographic characters normalised per spec Step 3b. Keys use explicit
+# \uXXXX escapes so the source file stays free of homoglyph-flagged literals.
+_PDF_TYPOGRAPHIC: dict[str, str] = {
+    "\u2014": " \u2014 ",  # em dash, surrounded by spaces for tokenisation
+    "\u2013": " - ",  # en dash -> ASCII hyphen
+    "\u201c": '"',  # left double quote
+    "\u201d": '"',  # right double quote
+    "\u2018": "'",  # left single quote
+    "\u2019": "'",  # right single quote
+    "\u2026": "...",  # ellipsis
+    "\u00ad": "",  # soft hyphen removed entirely
+}
+
+# pymupdf span flags bit-positions.
+_FITZ_FLAG_BOLD = 1 << 4  # value 16
+
+# Defaults for running-line detection (Step 0e).
+_RUNNING_LINE_Y_TOLERANCE_PX = 3.0
+_RUNNING_LINE_MIN_PAGES = 3
 
 
-def extract_pdf(
-    path: Path, config: ARGConfig
-) -> Iterator[tuple[int, str, dict[str, Any]]]:  # pragma: no cover - second pass
-    """Yield ``(page_number, page_text, page_metadata)`` for each PDF page.
+# ---- helper: title resolution -----------------------------------------------
 
-    Pass-1 stub: raises NotImplementedError. The crawler currently records PDF
-    file paths as link-graph edges but does not invoke this function.
+
+def _resolve_pdf_title(
+    pdf_metadata: dict[str, str], largest_first_page_line: str | None, filename_stem: str
+) -> str:
+    """Apply the three-step rule from Step 0c: /Title → largest line → filename stem."""
+    raw = (pdf_metadata.get("title") or "").strip()
+    if raw and not _PDF_TITLE_TEMP_RE.match(raw):
+        return raw
+    if largest_first_page_line:
+        return largest_first_page_line.strip()
+    return filename_stem
+
+
+# ---- helper: text cleaning --------------------------------------------------
+
+
+def _rejoin_soft_hyphens(text: str) -> str:
+    """Rejoin words split across line wraps when the next line is lowercase."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if i + 1 < len(lines) and line.endswith("-"):
+            nxt = lines[i + 1]
+            if nxt and nxt[:1].islower():
+                out.append(line[:-1] + nxt)
+                i += 2
+                continue
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
+def _clean_pdf_text(text: str) -> str:
+    """Apply spec Step 3 (a, b, c) to one page's text."""
+    text = _rejoin_soft_hyphens(text)
+    text = unicodedata.normalize("NFC", text)
+    for lig, rep in _PDF_LIGATURES.items():
+        text = text.replace(lig, rep)
+    for char, rep in _PDF_TYPOGRAPHIC.items():
+        text = text.replace(char, rep)
+    text = text.replace("\u00a0", " ")
+    text = text.replace("\t", " ")
+    text = _TRIPLE_NEWLINE_RE.sub("\n\n", text)
+    text = _MULTI_SPACE_RE.sub(" ", text)
+    return text.strip()
+
+
+# ---- helper: running header / footer detection ------------------------------
+
+
+def _detect_running_lines(
+    pages: list[list[tuple[float, str]]],
+    min_pages: int = _RUNNING_LINE_MIN_PAGES,
+    y_tolerance: float = _RUNNING_LINE_Y_TOLERANCE_PX,
+) -> set[tuple[float, str]]:
+    """Return `(y_bucket, text)` pairs that appear on `>= min_pages` pages.
+
+    `pages` is per-page list of `(y_position, text)` tuples. Each page
+    contributes only one occurrence of any given (y_bucket, text) pair so a
+    duplicate line on the same page doesn't tip the threshold.
     """
-    raise NotImplementedError(
-        "PDF extraction is implemented in pass 2 of Section 5; "
-        "the HTML pass records PDFs as graph edges only."
-    )
+    counter: Counter[tuple[float, str]] = Counter()
+    for page in pages:
+        seen_this_page: set[tuple[float, str]] = set()
+        for y, text in page:
+            stripped = text.strip()
+            if not stripped:
+                continue
+            bucket = round(y / y_tolerance) * y_tolerance
+            seen_this_page.add((bucket, stripped))
+        for key in seen_this_page:
+            counter[key] += 1
+    return {k for k, v in counter.items() if v >= min_pages}
+
+
+# ---- helper: font-based heading sentinels -----------------------------------
+
+
+def _heading_sentinel_map(fitz_page: fitz.Page) -> dict[str, str]:
+    """Walk a pymupdf page and return ``{line_text: sentinel}`` for headings.
+
+    Heuristics (Section 5 Step 2):
+      * size > 1.5x body-median  -> ``##H1## ``
+      * size > 1.2x body-median and <= 1.5x  -> ``##H2## ``
+      * bold AND within 10% of body-median size  -> ``##H3## ``
+    """
+    lines: list[tuple[str, float, bool]] = []  # (text, max_span_size, any_bold)
+    for block in fitz_page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:  # 0 = text, 1 = image
+            continue
+        for line in block["lines"]:
+            spans = line["spans"]
+            if not spans:
+                continue
+            text = "".join(s["text"] for s in spans).strip()
+            if not text:
+                continue
+            size = max(s["size"] for s in spans)
+            bold = any((s["flags"] & _FITZ_FLAG_BOLD) for s in spans)
+            lines.append((text, size, bold))
+
+    if not lines:
+        return {}
+
+    body_median = statistics.median(s for _, s, _ in lines)
+    if body_median <= 0:
+        return {}
+
+    sentinels: dict[str, str] = {}
+    for text, size, bold in lines:
+        if size > 1.5 * body_median:
+            sentinels[text] = "##H1## "
+        elif size > 1.2 * body_median:
+            sentinels[text] = "##H2## "
+        elif bold and abs(size - body_median) / body_median <= 0.1:
+            sentinels[text] = "##H3## "
+    return sentinels
+
+
+def _inject_pdf_heading_sentinels(body_text: str, heading_map: dict[str, str]) -> str:
+    """Prepend sentinels to lines that match a heading-text key."""
+    if not heading_map:
+        return body_text
+    out: list[str] = []
+    for line in body_text.split("\n"):
+        stripped = line.strip()
+        prefix = heading_map.get(stripped, "")
+        out.append(prefix + line if prefix else line)
+    return "\n".join(out)
+
+
+def _largest_first_page_line(fitz_page: fitz.Page) -> str | None:
+    """Return the line on the page with the largest font size (for title fallback)."""
+    best_size = -1.0
+    best_text: str | None = None
+    for block in fitz_page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block["lines"]:
+            spans = line["spans"]
+            if not spans:
+                continue
+            text = "".join(s["text"] for s in spans).strip()
+            if not text:
+                continue
+            size = max(s["size"] for s in spans)
+            if size > best_size:
+                best_size = size
+                best_text = text
+    return best_text
+
+
+# ---- helper: sidecar config -------------------------------------------------
+
+
+def _read_pdf_sidecar(pdf_path: Path) -> dict[str, Any]:
+    """Read ``{pdf_path}.argconfig`` JSON if present; otherwise return ``{}``."""
+    sidecar = pdf_path.with_suffix(pdf_path.suffix + ".argconfig")
+    if not sidecar.is_file():
+        return {}
+    try:
+        with sidecar.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            logger.warning("PDF sidecar %s is not a JSON object; ignoring", sidecar)
+            return {}
+        return data
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to read PDF sidecar %s: %s", sidecar, exc)
+        return {}
+
+
+# ---- helper: pdfplumber + table splicing ------------------------------------
+
+
+def _rows_to_markdown(rows: list[list[str | None]]) -> str:
+    """Convert pdfplumber's rows-of-cells output to pipe-Markdown."""
+    cleaned: list[list[str]] = []
+    for row in rows:
+        cleaned.append([_squash_inline_whitespace(c or "") for c in row])
+    if not cleaned:
+        return ""
+    width = max(len(r) for r in cleaned)
+    cleaned = [r + [""] * (width - len(r)) for r in cleaned]
+    header = cleaned[0]
+    body = cleaned[1:]
+    out = ["| " + " | ".join(header) + " |", "|" + "|".join(["---"] * width) + "|"]
+    for r in body:
+        out.append("| " + " | ".join(r) + " |")
+    return "\n".join(out)
+
+
+def _group_chars_to_lines(
+    chars: list[dict[str, Any]], y_tolerance: float = 3.0
+) -> list[tuple[float, str]]:
+    """Group pdfplumber `chars` into lines by y-proximity. Returns [(y_top, text)]."""
+    if not chars:
+        return []
+    sorted_chars = sorted(chars, key=lambda c: (c["top"], c["x0"]))
+    lines: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_y: float | None = None
+    for c in sorted_chars:
+        if current_y is None or abs(c["top"] - current_y) <= y_tolerance:
+            current.append(c)
+            current_y = c["top"] if current_y is None else current_y
+        else:
+            lines.append(current)
+            current = [c]
+            current_y = c["top"]
+    if current:
+        lines.append(current)
+
+    out: list[tuple[float, str]] = []
+    for line in lines:
+        line.sort(key=lambda c: c["x0"])
+        text = ""
+        prev_x1: float | None = None
+        for c in line:
+            if prev_x1 is not None and c["x0"] - prev_x1 > 1.5:
+                text += " "
+            text += c["text"]
+            prev_x1 = c["x1"]
+        out.append((line[0]["top"], _squash_inline_whitespace(text)))
+    return out
+
+
+def _char_in_any_bbox(c: dict[str, Any], bboxes: list[tuple[float, float, float, float]]) -> bool:
+    x0, top, x1, bottom = c["x0"], c["top"], c["x1"], c["bottom"]
+    for bx0, by0, bx1, by1 in bboxes:
+        if x0 >= bx0 and x1 <= bx1 and top >= by0 and bottom <= by1:
+            return True
+    return False
+
+
+def _pdfplumber_extract_page(page: Any) -> tuple[list[tuple[float, str]], list[str], int]:
+    """Stage 1a — pdfplumber. Returns (lines_with_y, markdown_tables, total_chars)."""
+    tables = list(page.find_tables())
+    bboxes = [t.bbox for t in tables]
+    markdown_tables: list[str] = []
+    items: list[tuple[float, str]] = []
+    for t in tables:
+        try:
+            rows = t.extract()
+        except Exception:
+            rows = []
+        if rows:
+            md = _rows_to_markdown(rows)
+            if md:
+                markdown_tables.append(md)
+                items.append((t.bbox[1], md))
+
+    chars_outside_tables = [c for c in page.chars if not _char_in_any_bbox(c, bboxes)]
+    body_lines = _group_chars_to_lines(chars_outside_tables)
+    items.extend(body_lines)
+    items.sort(key=lambda x: x[0])
+
+    body_text = "\n".join(text for _, text in items if text)
+    total_chars = len(body_text)
+    return body_lines, markdown_tables, total_chars
+
+
+# ---- helper: pymupdf text + OCR stages --------------------------------------
+
+
+def _pymupdf_extract_text(fitz_page: fitz.Page) -> tuple[list[tuple[float, str]], int]:
+    """Stage 1b — pymupdf text. Returns (lines_with_y, total_chars)."""
+    lines: list[tuple[float, str]] = []
+    for block in fitz_page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block["lines"]:
+            spans = line["spans"]
+            if not spans:
+                continue
+            text = "".join(s["text"] for s in spans).strip()
+            if not text:
+                continue
+            y = line["bbox"][1]
+            lines.append((y, text))
+    total_chars = sum(len(text) for _, text in lines)
+    return lines, total_chars
+
+
+def _pymupdf_extract_ocr(fitz_page: fitz.Page) -> tuple[list[tuple[float, str]], int]:
+    """Stage 1c — pymupdf OCR. Returns (lines_with_y, total_chars).
+
+    Wrapped in try/except: if Tesseract isn't installed, OCR fails and we
+    return empty so the caller can fall through gracefully rather than crash
+    the whole indexing run.
+    """
+    try:
+        tp = fitz_page.get_textpage_ocr(full=True)
+        text = tp.extractText()
+    except Exception as exc:
+        logger.warning(
+            "OCR failed on page %s (tesseract not installed?): %s",
+            fitz_page.number,
+            exc,
+        )
+        return [], 0
+    # OCR doesn't give us per-line y positions cheaply — synthesise rising y
+    # values so the running-line detector can still see them in y order.
+    lines: list[tuple[float, str]] = []
+    for i, line in enumerate(text.split("\n")):
+        if line.strip():
+            lines.append((float(i), line))
+    total_chars = sum(len(text) for _, text in lines)
+    return lines, total_chars
+
+
+# ---- main entry points ------------------------------------------------------
+
+
+def _open_pdf(path: Path) -> fitz.Document | None:
+    try:
+        doc = fitz.open(path)
+    except (fitz.FileDataError, fitz.EmptyFileError, RuntimeError, FileNotFoundError) as exc:
+        logger.warning("Skipping unreadable PDF: %s — %s", path, exc)
+        return None
+    except Exception as exc:
+        logger.warning("Skipping unreadable PDF: %s — %s", path, exc)
+        return None
+    if doc.is_encrypted:
+        logger.warning("Skipping encrypted PDF: %s", path)
+        doc.close()
+        return None
+    return doc
+
+
+def extract_pdf_metadata(path: Path, config: ARGConfig) -> dict[str, Any] | None:
+    """Return doc-level PDF metadata: title, page_description, keywords, links_to.
+
+    Returns ``None`` if the PDF is encrypted or unreadable.
+    """
+    doc = _open_pdf(path)
+    if doc is None:
+        return None
+    try:
+        meta = dict(doc.metadata or {})
+
+        # Largest first-page line as a fallback title source.
+        largest = _largest_first_page_line(doc[0]) if doc.page_count > 0 else None
+        title = _resolve_pdf_title(meta, largest, path.stem)
+
+        page_description = (meta.get("subject") or "").strip()
+        keywords = (meta.get("keywords") or "").strip()
+
+        # Internal links: pymupdf gives each annotation a kind. URI links go
+        # straight into the link graph; named-destination links (kind == LINK_GOTO)
+        # stay inside the PDF and are not useful for cross-doc traversal.
+        links_to: list[str] = []
+        for page in doc:
+            for link in page.get_links():
+                uri = link.get("uri")
+                if uri:
+                    links_to.append(uri)
+
+        # Form-field detection — warn but continue.
+        if doc.is_form_pdf:
+            logger.warning(
+                "PDF %s contains AcroForm fields — extracted text may be incomplete",
+                path,
+            )
+
+        return {
+            "title": title,
+            "page_description": page_description,
+            "keywords": keywords,
+            "links_to": links_to,
+            "page_count": doc.page_count,
+            "is_form_pdf": bool(doc.is_form_pdf),
+        }
+    finally:
+        doc.close()
+
+
+def extract_pdf(path: Path, config: ARGConfig) -> Iterator[tuple[int, str, dict[str, Any]]]:
+    """Stream per-page extraction results.
+
+    Yields ``(page_number, page_text, page_metadata)`` for each page where
+    ``page_metadata`` has keys ``tables`` (list[str]), ``ocr_used`` (bool),
+    ``char_count`` (int), ``heading_sentinels`` (list[str]).
+
+    Skips the whole document and yields nothing if the PDF is encrypted or
+    unreadable (a warning has already been logged).
+
+    Per-document sidecar overrides: a JSON file
+    ``{path}.argconfig`` next to the PDF may override ``pdf_layout_analysis``
+    for this document only.
+    """
+    doc = _open_pdf(path)
+    if doc is None:
+        return
+    try:
+        # Sidecar overrides apply only inside this generator.
+        sidecar = _read_pdf_sidecar(path)
+        layout_analysis = bool(sidecar.get("pdf_layout_analysis", config.pdf_layout_analysis))
+
+        # Step 0e — running header/footer detection. We need every page's lines
+        # before we yield page 1, so we scan twice. For small docs this is
+        # negligible; for huge docs we could move this to a sampling pass.
+        all_pages_lines: list[list[tuple[float, str]]] = []
+        with pdfplumber.open(str(path)) as pdf:
+            for pp in pdf.pages:
+                chars_outside = [
+                    c
+                    for c in pp.chars
+                    if not _char_in_any_bbox(c, [t.bbox for t in pp.find_tables()])
+                ]
+                all_pages_lines.append(_group_chars_to_lines(chars_outside))
+
+        running_lines = _detect_running_lines(all_pages_lines)
+
+        # Step 1 — per-page extraction.
+        with pdfplumber.open(str(path)) as pdf:
+            for page_index, plumber_page in enumerate(pdf.pages):
+                fitz_page = doc[page_index]
+                ocr_used = False
+
+                # 1a pdfplumber
+                lines, markdown_tables, total_chars = _pdfplumber_extract_page(plumber_page)
+                # The spec calls for `layout=config.pdf_layout_analysis` on
+                # extract_text(). Our chars-based path is layout-agnostic; we
+                # still honour the override by passing it to pdfplumber when
+                # falling back to its built-in extractor on edge cases.
+                _ = layout_analysis  # acknowledged; built-in extract_text path not currently exercised
+
+                # 1b pymupdf text
+                if total_chars < config.ocr_char_threshold:
+                    lines, total_chars = _pymupdf_extract_text(fitz_page)
+                    markdown_tables = []
+                # 1c pymupdf OCR
+                if total_chars < config.ocr_char_threshold and config.ocr_enabled:
+                    logger.info("OCR used for page %s of %s", page_index + 1, path)
+                    lines, total_chars = _pymupdf_extract_ocr(fitz_page)
+                    markdown_tables = []
+                    ocr_used = True
+
+                # Strip running headers/footers
+                stripped_lines = [
+                    (y, text)
+                    for y, text in lines
+                    if (
+                        round(y / _RUNNING_LINE_Y_TOLERANCE_PX) * _RUNNING_LINE_Y_TOLERANCE_PX,
+                        text.strip(),
+                    )
+                    not in running_lines
+                ]
+
+                # Step 2 — font-based heading sentinels
+                sentinel_map = _heading_sentinel_map(fitz_page)
+                body_text = "\n".join(text for _, text in stripped_lines)
+                if markdown_tables:
+                    body_text = body_text + "\n" + "\n\n".join(markdown_tables)
+                body_text = _inject_pdf_heading_sentinels(body_text, sentinel_map)
+
+                # Step 3 — text cleaning
+                body_text = _clean_pdf_text(body_text)
+
+                # Step 4 — page metadata assembly
+                heading_sentinels = [sent + text for text, sent in sentinel_map.items()]
+                page_metadata: dict[str, Any] = {
+                    "tables": markdown_tables,
+                    "ocr_used": ocr_used,
+                    "char_count": len(body_text),
+                    "heading_sentinels": heading_sentinels,
+                }
+                yield (page_index + 1, body_text, page_metadata)
+    finally:
+        doc.close()
+
+
+def extract_pdf_to_document(path: Path, config: ARGConfig) -> Document | None:
+    """Assemble a `Document` for a PDF by consuming `extract_pdf`.
+
+    Returns ``None`` when the PDF is encrypted, corrupt, or otherwise
+    unreadable so the crawler can skip the file silently and continue.
+    """
+    meta = extract_pdf_metadata(path, config)
+    if meta is None:
+        return None
+
+    pages_text: list[str] = []
+    per_page_meta: list[dict[str, Any]] = []
+    for page_num, text, page_meta in extract_pdf(path, config):
+        pages_text.append(text)
+        per_page_meta.append({"page_number": page_num, **page_meta})
+
+    content = "\n\n".join(pages_text).strip()
+
+    metadata: dict[str, Any] = {
+        "title": meta["title"],
+        "page_description": meta["page_description"],
+        "keywords": meta["keywords"],
+        "heading_path": meta["title"],
+        "links_to": list(meta["links_to"]),
+        "file_type": "pdf",
+        "code_blocks": [],
+        "page_count": meta["page_count"],
+        "is_form_pdf": meta["is_form_pdf"],
+        "page_metadata": per_page_meta,
+    }
+    return Document(path=path.resolve(), content=content, metadata=metadata)

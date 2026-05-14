@@ -227,12 +227,35 @@ def test_links_to_normalised_to_absolute_paths(docs_root, config):
     assert str((docs_root / "sub" / "b.html").resolve()) in links
 
 
-def test_links_to_includes_pdf_edges_even_when_pdf_not_yielded(docs_root, config):
-    """Pass-1 contract: PDF target is recorded in links_to even though crawler
-    does not yield a Document for it yet (PDF extractor lands in pass 2)."""
-    write(docs_root / "index.html", html_with_links("manual.pdf"))
-    write(docs_root / "manual.pdf", "%PDF")
+def test_links_to_records_unreadable_pdf_as_edge_only(docs_root, config):
+    """Unreadable PDFs are skipped as Documents but still recorded as edges."""
+    write(docs_root / "index.html", html_with_links("broken.pdf"))
+    (docs_root / "broken.pdf").write_bytes(b"%PDF-1.4 not a real pdf")
     docs = list(crawl(docs_root, config))
     assert _paths(docs) == {"index.html"}
     index = docs[0]
-    assert str((docs_root / "manual.pdf").resolve()) in index.metadata["links_to"]
+    assert str((docs_root / "broken.pdf").resolve()) in index.metadata["links_to"]
+
+
+def test_crawler_yields_pdf_document_for_valid_pdf(docs_root, config):
+    """A valid PDF linked from index.html is yielded as a `file_type=pdf` Document."""
+    import pymupdf as fitz
+
+    write(docs_root / "index.html", html_with_links("manual.pdf"))
+    pdf_path = docs_root / "manual.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (50, 50),
+        "A long enough paragraph of native body text so pdfplumber wins "
+        "and OCR is not triggered for this fixture document.",
+    )
+    doc.set_metadata({"title": "Manual"})
+    doc.save(str(pdf_path))
+    doc.close()
+
+    docs = list(crawl(docs_root, config))
+    pdf_docs = [d for d in docs if d.metadata.get("file_type") == "pdf"]
+    assert len(pdf_docs) == 1
+    assert pdf_docs[0].metadata["title"] == "Manual"
+    assert pdf_docs[0].path == pdf_path.resolve()
