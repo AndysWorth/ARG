@@ -32,7 +32,7 @@ import logging
 from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from arg.config import ARGConfig
 from arg.crawler.extractors import Document, extract_html, extract_pdf_to_document
@@ -74,7 +74,11 @@ def normalise_href(href: str, source_path: Path, docs_root: Path) -> Path | None
         return None
 
     # Fragments are discarded — they don't change the target file.
-    target = parts.path
+    # URL-decode percent escapes so on-disk filenames with spaces, apostrophes,
+    # or other URL-unsafe characters resolve correctly. HTML generators
+    # routinely emit hrefs like ``Aiden%27s%20Schedule.html`` for files
+    # actually named ``Aiden's Schedule.html``.
+    target = unquote(parts.path)
     if not target:
         return None
 

@@ -100,6 +100,23 @@ def test_normalise_href_strips_fragment(docs_root):
     assert result == (docs_root / "page.html").resolve()
 
 
+def test_normalise_href_url_decodes_percent_escapes(docs_root):
+    """Filenames with spaces / apostrophes round-trip through URL-encoded hrefs.
+
+    HTML generators emit ``Aiden%27s%20Schedule.html`` for files actually
+    named ``Aiden's Schedule.html``; the crawler must unquote before
+    touching the filesystem or it'll FileNotFoundError on the literal
+    percent-encoded path.
+    """
+    target_name = "Aiden's Schedule and Rules.html"
+    write(docs_root / target_name, "<html><body>x</body></html>")
+    src = docs_root / "index.html"
+    src.touch()
+    encoded_href = "Aiden%27s%20Schedule%20and%20Rules.html"
+    result = normalise_href(encoded_href, src.resolve(), docs_root.resolve())
+    assert result == (docs_root / target_name).resolve()
+
+
 def test_normalise_href_accepts_pdf(docs_root):
     write(docs_root / "manual.pdf", "%PDF")
     src = docs_root / "index.html"
