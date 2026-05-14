@@ -946,11 +946,21 @@ def extract_pdf_to_document(path: Path, config: ARGConfig) -> Document | None:
 
     pages_text: list[str] = []
     per_page_meta: list[dict[str, Any]] = []
+    # Track the character offset at which each page begins inside ``content``.
+    # ``page_offsets[i] == start of page (i+1) inside content``. Chunker uses
+    # this to attribute chunks back to PDF page numbers (Section 7).
+    page_offsets: list[int] = []
+    separator = "\n\n"
+    cursor = 0
     for page_num, text, page_meta in extract_pdf(path, config):
+        page_offsets.append(cursor)
         pages_text.append(text)
         per_page_meta.append({"page_number": page_num, **page_meta})
+        cursor += len(text) + len(separator)
 
-    content = "\n\n".join(pages_text).strip()
+    # Skip the trailing `.strip()` from the previous implementation — stripping
+    # leading whitespace would shift every subsequent page_offset.
+    content = separator.join(pages_text)
 
     metadata: dict[str, Any] = {
         "title": meta["title"],
@@ -963,5 +973,6 @@ def extract_pdf_to_document(path: Path, config: ARGConfig) -> Document | None:
         "page_count": meta["page_count"],
         "is_form_pdf": meta["is_form_pdf"],
         "page_metadata": per_page_meta,
+        "page_offsets": page_offsets,
     }
     return Document(path=path.resolve(), content=content, metadata=metadata)
