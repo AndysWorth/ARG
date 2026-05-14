@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ARG — Archivist RAG Graph</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root {
+      --bg: #0e1116;
+      --fg: #e6e9ef;
+      --muted: #9aa3b2;
+      --accent: #5fd0b5;
+      --panel: #161b22;
+      --border: #2b313a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: var(--bg); color: var(--fg);
+      display: grid; grid-template-rows: auto 1fr; height: 100vh;
+    }
+    header {
+      padding: 12px 20px; border-bottom: 1px solid var(--border);
+      display: flex; gap: 16px; align-items: center;
+    }
+    header h1 { font-size: 16px; margin: 0; }
+    header .muted { color: var(--muted); font-size: 12px; }
+    main {
+      display: grid; grid-template-columns: 280px 1fr 380px;
+      gap: 0; overflow: hidden; min-height: 0;
+    }
+    aside, section, .right {
+      padding: 16px; overflow: auto; border-right: 1px solid var(--border);
+    }
+    .right { border-right: 0; border-left: 1px solid var(--border); }
+    h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .doc { padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+    .doc:hover { background: var(--panel); }
+    .doc.active { background: var(--panel); border-left: 2px solid var(--accent); padding-left: 6px; }
+    .query-box { display: flex; gap: 8px; margin-bottom: 16px; }
+    .query-box input {
+      flex: 1; padding: 10px 12px; background: var(--panel); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 6px; font: inherit;
+    }
+    button {
+      padding: 10px 16px; background: var(--accent); color: #0e1116;
+      border: 0; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    .answer { white-space: pre-wrap; background: var(--panel); padding: 16px; border-radius: 6px; }
+    .sources { margin-top: 16px; font-size: 12px; }
+    .source-row { padding: 4px 0; color: var(--muted); }
+    .source-row .title { color: var(--fg); }
+    #graph { height: 380px; background: var(--panel); border-radius: 6px; }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      background: var(--panel); color: var(--muted); font-size: 11px;
+    }
+    .empty { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ARG <span class="muted">— Archivist RAG Graph</span></h1>
+    <span class="pill" id="health-pill">connecting…</span>
+    <span class="muted" id="corpus-pill"></span>
+  </header>
+  <main>
+    <aside>
+      <h2>Documents</h2>
+      <div id="doc-list"><div class="empty">Loading…</div></div>
+      <h2 style="margin-top: 24px;">Topics</h2>
+      <div id="topic-list"><div class="empty">Loading…</div></div>
+    </aside>
+
+    <section>
+      <div class="query-box">
+        <input id="q" type="text" placeholder="Ask anything…" />
+        <button id="ask">Ask</button>
+      </div>
+      <div id="answer" class="answer empty">Ask a question above.</div>
+      <div id="sources" class="sources"></div>
+
+      <h2 style="margin-top: 24px;">Document graph</h2>
+      <div id="graph"></div>
+    </section>
+
+    <div class="right">
+      <h2>Document detail</h2>
+      <div id="doc-detail" class="empty">Select a document on the left.</div>
+    </div>
+  </main>
+
+  <script src="/static/d3.min.js"></script>
+  <script>
+    const corpus = new URLSearchParams(location.search).get("corpus") || "default";
+    document.getElementById("corpus-pill").textContent = "corpus: " + corpus;
+
+    async function api(path, opts = {}) {
+      const sep = path.includes("?") ? "&" : "?";
+      const url = path + sep + "corpus=" + encodeURIComponent(corpus);
+      const r = await fetch(url, opts);
+      if (!r.ok) throw new Error(r.status + " " + (await r.text()));
+      return r.json();
+    }
+
+    async function refreshHealth() {
+      try {
+        const h = await api("/health");
+        document.getElementById("health-pill").textContent =
+          h.status + " · " + h.doc_count + " docs · " + h.chunk_count + " chunks";
+      } catch (e) {
+        document.getElementById("health-pill").textContent = "offline";
+      }
+    }
+
+    async function refreshDocs() {
+      const docs = await api("/corpus");
+      const el = document.getElementById("doc-list");
+      el.innerHTML = "";
+      docs.forEach(d => {
+        const row = document.createElement("div");
+        row.className = "doc";
+        row.textContent = d.title || d.doc_id;
+        row.addEventListener("click", () => loadDoc(d.doc_id, row));
+        el.appendChild(row);
+      });
+      if (docs.length === 0) el.innerHTML = '<div class="empty">No documents indexed.</div>';
+    }
+
+    async function refreshTopics() {
+      try {
+        const topics = await api("/corpus/topics");
+        const el = document.getElementById("topic-list");
+        el.innerHTML = "";
+        topics.forEach(t => {
+          const row = document.createElement("div");
+          row.className = "doc";
+          row.textContent = t.label + " (" + t.doc_ids.length + ")";
+          el.appendChild(row);
+        });
+      } catch (e) {
+        document.getElementById("topic-list").innerHTML =
+          '<div class="empty">Topics unavailable.</div>';
+      }
+    }
+
+    async function loadDoc(docId, rowEl) {
+      document.querySelectorAll(".doc.active").forEach(d => d.classList.remove("active"));
+      if (rowEl) rowEl.classList.add("active");
+      const el = document.getElementById("doc-detail");
+      el.innerHTML = "Loading…";
+      try {
+        const meta = await api("/corpus/" + encodeURIComponent(docId));
+        el.innerHTML = "<h3>" + meta.title + "</h3>" +
+          "<div class='muted'>" + meta.file_type + " · " + meta.chunk_count + " chunks</div>" +
+          "<h2 style='margin-top:16px;'>Key points</h2>" +
+          "<ul>" + meta.key_points.map(p => "<li>" + p + "</li>").join("") + "</ul>";
+      } catch (e) {
+        el.innerHTML = "<div class='empty'>" + e.message + "</div>";
+      }
+    }
+
+    async function ask() {
+      const q = document.getElementById("q").value.trim();
+      if (!q) return;
+      const answerEl = document.getElementById("answer");
+      const sourcesEl = document.getElementById("sources");
+      answerEl.textContent = "Thinking…";
+      sourcesEl.innerHTML = "";
+      try {
+        const r = await fetch("/query?corpus=" + encodeURIComponent(corpus), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ question: q }),
+        });
+        const data = await r.json();
+        answerEl.textContent = data.answer || "(no answer)";
+        sourcesEl.innerHTML = "<h2>Sources</h2>" + data.sources.map(s =>
+          "<div class='source-row'><span class='title'>" + (s.title || s.doc_id) + "</span> — " +
+          s.heading_path + "</div>"
+        ).join("");
+      } catch (e) {
+        answerEl.textContent = e.message;
+      }
+    }
+
+    async function refreshGraph() {
+      try {
+        const g = await api("/corpus/graph");
+        renderGraph(g.nodes, g.edges);
+      } catch (e) { /* graph optional */ }
+    }
+
+    function renderGraph(nodes, edges) {
+      if (!window.d3) return;
+      const w = document.getElementById("graph").clientWidth;
+      const h = 380;
+      d3.select("#graph").selectAll("*").remove();
+      const svg = d3.select("#graph").append("svg").attr("width", w).attr("height", h);
+      const link = svg.append("g").attr("stroke", "#3a4252").selectAll("line").data(edges)
+        .join("line").attr("stroke-width", 1);
+      const node = svg.append("g").selectAll("circle").data(nodes)
+        .join("circle").attr("r", 6).attr("fill", "#5fd0b5");
+      node.append("title").text(d => d.title || d.id);
+      const sim = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(edges).id(d => d.id).distance(80))
+        .force("charge", d3.forceManyBody().strength(-180))
+        .force("center", d3.forceCenter(w / 2, h / 2));
+      sim.on("tick", () => {
+        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+        node.attr("cx", d => d.x).attr("cy", d => d.y);
+      });
+    }
+
+    document.getElementById("ask").addEventListener("click", ask);
+    document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
+
+    refreshHealth();
+    refreshDocs();
+    refreshTopics();
+    refreshGraph();
+  </script>
+</body>
+</html>
