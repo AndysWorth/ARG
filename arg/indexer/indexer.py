@@ -49,13 +49,14 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import chromadb
 import tiktoken
 
 from arg.config import ARGConfig
 from arg.crawler.extractors import Document
+from arg.embeddings import Embedder
 from arg.graph import KnowledgeGraph
 from arg.indexer.chunker import chunk_document
 from arg.retriever.bm25_index import BM25Index
@@ -64,23 +65,6 @@ logger = logging.getLogger(__name__)
 
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 _DOC_EMBED_TOKEN_BUDGET = 512
-
-
-# ---------------------------------------------------------------------------
-# Embedder interface
-# ---------------------------------------------------------------------------
-
-
-class Embedder(Protocol):
-    """Pluggable embedding source.
-
-    Production wires this to Ollama via ``OllamaEmbedding`` (Section 9). Unit
-    tests inject a deterministic fake to keep the suite offline.
-    """
-
-    def embed(self, text: str) -> list[float]: ...
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
 
 
 # ---------------------------------------------------------------------------
