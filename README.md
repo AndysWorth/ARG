@@ -6,7 +6,7 @@ Runs entirely on Apple M1 Max (64GB). Zero cloud calls. Zero telemetry.
 
 ## What ARG Does
 
-ARG indexes a directory of HTML and PDF documentation, follows links recursively
+ARG indexes a directory of HTML, PDF, and plain-text documentation, follows links recursively
 to build a knowledge graph of the corpus, and answers questions over it using
 hybrid retrieval: dense embeddings (nomic-embed-text via Ollama), sparse BM25
 keyword search, and knowledge-graph traversal. Generation uses Llama 3.3 70B
@@ -121,6 +121,9 @@ All tunables live in `.env` (copy from `.env.example`). Key settings:
 
 ## Known Limitations
 
+- **Markdown structure** is not parsed — `.md` and `.markdown` files index
+  as plain text. Atx-style headings (`# H1`, `## H2`) are not recognised
+  as chunk boundaries. A future feature may add Markdown-aware extraction.
 - **iframes** are not followed or indexed — content inside an `<iframe src=...>`
   is invisible to the crawler.
 - **JavaScript-rendered content** is not indexed — ARG parses the HTML as

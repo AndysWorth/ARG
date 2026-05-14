@@ -1,7 +1,8 @@
 # Feature 0001: Plain-text file indexing
 
-**Status:** draft
+**Status:** shipped
 **Created:** 2026-05-14
+**Shipped:** 2026-05-14 (see commit log: `feat(crawler): plain-text indexing (Feature 0001)`)
 
 ---
 

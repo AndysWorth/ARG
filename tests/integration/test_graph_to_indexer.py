@@ -30,14 +30,15 @@ def test_indexer_produces_consistent_collections_and_files(
         documents = list(crawl(base_config.docs_root, base_config))
         stats = indexer.index(documents)
 
-        # 4 HTML + 2 readable PDFs (manual + scanned). encrypted_notice.pdf
-        # is found by the crawler but extract_pdf_to_document returns None
-        # for it, so it never reaches the indexer.
-        assert stats.documents_indexed == 6
-        assert stats.chunks_written >= 6  # each doc yields at least one chunk
+        # 4 HTML + 2 readable PDFs (manual + scanned) + 2 text
+        # (release_notes.txt + NOTES.md). encrypted_notice.pdf is found by
+        # the crawler but extract_pdf_to_document returns None for it, so
+        # it never reaches the indexer.
+        assert stats.documents_indexed == 8
+        assert stats.chunks_written >= 8  # each doc yields at least one chunk
 
         # documents collection: one row per source file
-        assert indexer._docs_coll.count() == 6
+        assert indexer._docs_coll.count() == 8
 
         # chunks collection: matches `chunks_written`
         assert indexer._chunks_coll.count() == stats.chunks_written

@@ -55,7 +55,12 @@ EVENT_CREATED = "created"
 EVENT_MODIFIED = "modified"
 EVENT_DELETED = "deleted"
 
-_INDEXABLE_SUFFIXES: frozenset[str] = frozenset({".html", ".htm", ".pdf"})
+# Same set as the crawler's indexable suffixes. Kept inline rather than
+# imported to avoid a watcher → crawler module dependency. If you add a
+# new suffix, add it to ``arg.crawler.crawler._INDEXABLE_SUFFIXES`` too.
+_INDEXABLE_SUFFIXES: frozenset[str] = frozenset(
+    {".html", ".htm", ".pdf", ".txt", ".md", ".markdown"}
+)
 
 # Type alias for the user-supplied callback signature.
 WatchCallback = Callable[[Path, str], None]

@@ -1,5 +1,5 @@
 # ARG — Archivist RAG Graph
-### A fully local, knowledge-graph-augmented RAG for HTML + PDF documentation
+### A fully local, knowledge-graph-augmented RAG for HTML, PDF, and plain-text documentation
 #### Optimized for Apple M1 Max · 64GB Unified Memory · Open Source Only
 
 ---
@@ -274,6 +274,7 @@ python scripts/eval_retrieval.py --db ./arg_db --corpus default --qa eval/qa_pai
 | **Query Processing** | QueryProcessor (custom) | Rewrite → decompose → optional HyDE; all local via Ollama |
 | **HTML Parsing** | BeautifulSoup4 + lxml | Robust, handles malformed HTML |
 | **PDF Parsing** | pdfplumber (primary) + pymupdf (fallback + OCR) | pdfplumber for text/tables; pymupdf for scanned/image PDFs with built-in OCR |
+| **Text Parsing** | Python stdlib `pathlib.Path.read_bytes()` | UTF-8 with latin-1 fallback; no new dependency. Markdown structure not parsed (Feature 0001) |
 | **OCR** | pymupdf built-in OCR + Tesseract data files | No second runtime; tessdata via `brew install tesseract` |
 | **File watching** | watchdog | Live incremental re-indexing on filesystem events |
 | **Web UI** | FastAPI + uvicorn + vanilla HTML/JS | Local only (`127.0.0.1`); no build step; no framework |
@@ -502,6 +503,7 @@ is a quick reference only; the build Claude should not need to consult it.
 | Context reordering | Lost-in-middle U-shape; rank 1 → position 0; rank 2 → position -1 |
 | Query processing | Rewrite → decompose → (optional HyDE); raw query used for generation |
 | DCI integration | Fully integrated into Sections 6–10; not a post-RAG layer |
+| Plain-text indexing | Feature 0001: `.txt` / `.md` / `.markdown` accepted via `extract_text`; UTF-8 → latin-1 fallback; no markdown heading detection (deferred to a future feature). See `docs/features/0001-plain-text-indexing.md`. |
 
 ## 14. Build Order Checklist
 

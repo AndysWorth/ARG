@@ -1,0 +1,32 @@
+Kraken API Release Notes
+========================
+
+v2.4.0 (2026-04-10)
+-------------------
+- Added support for the X-Kraken-Trace-Id header on every response, carrying
+  a unique request identifier suitable for correlation with server logs.
+  Operators reported this as the single most-requested observability
+  feature in the 2026 Q1 survey.
+- The /v2/oauth/token endpoint now accepts a `scope` parameter for
+  fine-grained capability requests. Scope values map onto the existing
+  permission grid.
+- Rate limit headers now include X-Rate-Limit-Bucket-Reset alongside the
+  existing X-Rate-Limit-Retry-After. The reset value is a Unix timestamp
+  for the bucket's next refill.
+
+v2.3.2 (2026-03-22)
+-------------------
+- Fixed a long-standing bug where compound queries against /v2/search
+  silently dropped a clause when more than five filters were combined.
+- API keys created in the dashboard now carry an explicit creation
+  timestamp surfaced via /v2/keys/me.
+
+v2.3.0 (2026-02-14)
+-------------------
+- Tier 3 customers now have access to the streaming endpoint at
+  /v2/stream. Connections are upgraded to WebSocket via the standard
+  HTTP/1.1 Upgrade dance.
+
+UNIQUE_RELEASE_NOTES_MARKER_TOKEN: this string only appears in the
+plain-text release notes; tests use it to verify the text-indexing path
+surfaces this document as a retrieval source.

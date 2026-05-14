@@ -168,6 +168,29 @@ def test_crawl_dedupes_circular_links(docs_root, config):
     assert _paths(docs) == {"index.html", "a.html", "b.html"}
 
 
+def test_crawl_yields_text_files_via_link_and_dirwalk(docs_root, config):
+    """Feature 0001: .txt linked from HTML + .md found only via dir walk."""
+    write(docs_root / "index.html", html_with_links("notes.txt"))
+    write(docs_root / "notes.txt", "release notes body\n")
+    write(docs_root / "NOTES.md", "# md notes\n")  # unlinked; dir walk only
+
+    docs = list(crawl(docs_root, config))
+    names = _paths(docs)
+    assert names == {"index.html", "notes.txt", "NOTES.md"}
+    types = {d.metadata["file_type"] for d in docs}
+    assert "text" in types
+    assert "html" in types
+
+
+def test_normalise_href_accepts_text_targets(docs_root):
+    src = docs_root / "index.html"
+    src.touch()
+    for name in ("notes.txt", "README.md", "x.markdown"):
+        write(docs_root / name, "content")
+        result = normalise_href(name, src.resolve(), docs_root.resolve())
+        assert result == (docs_root / name).resolve()
+
+
 def test_crawl_finds_unlinked_files_via_dirwalk(docs_root, config):
     write(docs_root / "index.html", html_with_links())  # no links
     write(docs_root / "orphan.html", "<html><body>orphan</body></html>")

@@ -8,6 +8,7 @@ from arg.crawler.extractors import (
     extract_pdf,
     extract_pdf_metadata,
     extract_pdf_to_document,
+    extract_text,
 )
 from arg.crawler.watcher import (
     EVENT_CREATED,
@@ -28,5 +29,6 @@ __all__ = [
     "extract_pdf",
     "extract_pdf_metadata",
     "extract_pdf_to_document",
+    "extract_text",
     "normalise_href",
 ]

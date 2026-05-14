@@ -35,12 +35,19 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from arg.config import ARGConfig
-from arg.crawler.extractors import Document, extract_html, extract_pdf_to_document
+from arg.crawler.extractors import Document, extract_html, extract_pdf_to_document, extract_text
 
 logger = logging.getLogger(__name__)
 
-_INDEXABLE_SUFFIXES: frozenset[str] = frozenset({".html", ".htm", ".pdf"})
 _HTML_SUFFIXES: frozenset[str] = frozenset({".html", ".htm"})
+_PDF_SUFFIXES: frozenset[str] = frozenset({".pdf"})
+# Plain-text suffix set per Feature 0001. Kept separate from HTML so the
+# crawler's dispatch makes it obvious that text doesn't go through
+# BeautifulSoup. .markdown accepted alongside .md (Markdown structure is
+# NOT parsed; the file flows through extract_text as plain text — see
+# docs/features/0001-plain-text-indexing.md).
+_TEXT_SUFFIXES: frozenset[str] = frozenset({".txt", ".md", ".markdown"})
+_INDEXABLE_SUFFIXES: frozenset[str] = _HTML_SUFFIXES | _PDF_SUFFIXES | _TEXT_SUFFIXES
 _SKIP_SCHEMES: frozenset[str] = frozenset({"mailto", "javascript", "tel", "ftp", "http", "https"})
 
 
@@ -184,8 +191,10 @@ def _extract_for_path(path: Path, config: ARGConfig) -> Document | None:
     try:
         if suffix in _HTML_SUFFIXES:
             return extract_html(path, config)
-        if suffix == ".pdf":
+        if suffix in _PDF_SUFFIXES:
             return extract_pdf_to_document(path, config)
+        if suffix in _TEXT_SUFFIXES:
+            return extract_text(path, config)
     except FileNotFoundError as exc:
         # A link or directory walk pointed at a path that's no longer there
         # (race with the watcher, broken symlink, etc.).

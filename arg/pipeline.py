@@ -331,13 +331,19 @@ class ARGPipeline:
     def _extract_one(self, path: Path) -> Document | None:
         """Dispatch to the appropriate extractor. Returns ``None`` for skips
         (encrypted PDFs, non-indexable suffixes)."""
-        from arg.crawler.extractors import extract_html, extract_pdf_to_document
+        from arg.crawler.extractors import (
+            extract_html,
+            extract_pdf_to_document,
+            extract_text,
+        )
 
         suffix = path.suffix.lower()
         if suffix in {".html", ".htm"}:
             return extract_html(path, self.config)
         if suffix == ".pdf":
             return extract_pdf_to_document(path, self.config)
+        if suffix in {".txt", ".md", ".markdown"}:
+            return extract_text(path, self.config)
         return None
 
     def _invalidate_summary(self, doc_path: Path) -> None:

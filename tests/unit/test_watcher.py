@@ -103,6 +103,10 @@ def test_negative_debounce_rejected(tmp_path, docs_root):
         ("a.html", FileCreatedEvent),
         ("b.htm", FileCreatedEvent),
         ("c.pdf", FileCreatedEvent),
+        # Feature 0001 — plain-text suffixes also trigger watcher callbacks.
+        ("d.txt", FileCreatedEvent),
+        ("e.md", FileCreatedEvent),
+        ("f.markdown", FileCreatedEvent),
     ],
 )
 def test_indexable_file_created_fires_callback(tmp_path, docs_root, name, kind_event):
@@ -151,7 +155,9 @@ def test_moved_event_dispatches_delete_then_create(tmp_path, docs_root):
 @pytest.mark.parametrize(
     "name",
     [
-        "page.txt",
+        # ``.txt`` / ``.md`` / ``.markdown`` are NOT in this list since
+        # Feature 0001 — they're indexable suffixes now and have their own
+        # positive test above.
         "data.csv",
         "image.png",
         "binary.bin",

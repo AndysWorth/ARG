@@ -1,9 +1,10 @@
 """Corpus A end-to-end RAG test.
 
-Covers the Section 12 e2e contract:
+Covers the Section 12 e2e contract (extended in Feature 0001 to cover
+plain-text indexing):
 
-  * Crawl + index produces all readable documents (4 HTML + 2 PDFs); the
-    AES-256 encrypted PDF is skipped without crashing.
+  * Crawl + index produces all readable documents (4 HTML + 2 PDFs +
+    2 text); the AES-256 encrypted PDF is skipped without crashing.
   * Cross-component metadata correctness: PDF /Title resolution, /Subject
     in document-level embedding text, temp-file title fallback.
   * Running footer "Kraken API Docs - Confidential" never makes it into a
@@ -57,15 +58,28 @@ def _resolved(corpus_root: Path, *parts: str) -> str:
 
 
 def test_all_readable_documents_indexed(indexed_pipeline, corpus_a_path):
-    """4 HTML + 2 readable PDFs = 6 docs. Encrypted PDF is skipped."""
+    """4 HTML + 2 readable PDFs + 2 text = 8 docs. Encrypted PDF is skipped."""
     docs = indexed_pipeline.graph.list_all_documents()
-    assert len(docs) == 6, f"expected 6 indexed docs; got {len(docs)}"
+    assert len(docs) == 8, f"expected 8 indexed docs; got {len(docs)}"
     # All four HTML fixture pages.
     for name in ("index.html", "page_a.html", "page_b.html", "subdir/page_c.html"):
         assert _doc_in(indexed_pipeline, name), f"missing {name}"
     # Both readable PDFs.
     for name in ("manual.pdf", "scanned_notice.pdf"):
         assert _doc_in(indexed_pipeline, name), f"missing {name}"
+    # Both plain-text fixtures (Feature 0001).
+    for name in ("release_notes.txt", "NOTES.md"):
+        assert _doc_in(indexed_pipeline, name), f"missing {name}"
+
+
+def test_text_file_surfaces_as_retrieval_source(indexed_pipeline, corpus_a_path):
+    """A query carrying a marker that ONLY appears in release_notes.txt
+    must return that text file as a source (BM25 path; no LLM needed)."""
+    result = indexed_pipeline.query("UNIQUE_RELEASE_NOTES_MARKER_TOKEN", enrich=False)
+    source_doc_ids = {s.doc_id for s in result.sources}
+    assert any("release_notes.txt" in (d or "") for d in source_doc_ids), (
+        f"text fixture not surfaced for marker-token query: {source_doc_ids}"
+    )
 
 
 def test_encrypted_pdf_not_indexed(indexed_pipeline, corpus_a_path):
@@ -79,12 +93,13 @@ def test_encrypted_pdf_not_indexed(indexed_pipeline, corpus_a_path):
     assert rows["ids"] == [], "encrypted PDF must not appear in ChromaDB"
 
 
-def test_page_a_links_to_pdfs_recorded_in_graph(indexed_pipeline, corpus_a_path):
-    """page_a.html now links to both manual.pdf and scanned_notice.pdf."""
+def test_page_a_links_to_pdfs_and_text_recorded_in_graph(indexed_pipeline, corpus_a_path):
+    """page_a.html links to manual.pdf, scanned_notice.pdf, and release_notes.txt."""
     page_a_id = _resolved(corpus_a_path, "page_a.html")
     forward = set(indexed_pipeline.graph.get_linked_docs(page_a_id, depth=1))
     assert _resolved(corpus_a_path, "manual.pdf") in forward
     assert _resolved(corpus_a_path, "scanned_notice.pdf") in forward
+    assert _resolved(corpus_a_path, "release_notes.txt") in forward
 
 
 def test_manual_pdf_title_from_metadata(indexed_pipeline, corpus_a_path):

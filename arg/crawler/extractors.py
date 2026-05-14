@@ -173,6 +173,48 @@ def extract_html(path: Path, config: ARGConfig) -> Document:
 
 
 # ---------------------------------------------------------------------------
+# Plain-text extractor (Feature 0001)
+# ---------------------------------------------------------------------------
+
+
+def extract_text(path: Path, config: ARGConfig) -> Document:
+    """Extract one ``.txt`` / ``.md`` / ``.markdown`` file into a `Document`.
+
+    Decoding: try UTF-8 (with BOM stripping via ``utf-8-sig``); fall back to
+    latin-1 on ``UnicodeDecodeError``. latin-1 is byte-clean so the fallback
+    never raises. Mojibake on rare encodings (CP932 / GB18030 / etc.) is
+    acceptable for v1 — operators with those corpora can convert upstream.
+
+    Title: the filename stem (no ``<title>`` to parse). No heading-sentinel
+    injection is performed — the chunker already handles the "no headings"
+    case by emitting one section covering the whole document. Markdown
+    semantic structure (``# H1`` / ``## H2``) is intentionally NOT parsed in
+    this feature; see docs/features/0001-plain-text-indexing.md for the
+    deferral rationale.
+    """
+    _ = config  # currently unused; kept for symmetry with the other extractors
+    raw_bytes = path.read_bytes()
+    try:
+        text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        # latin-1 maps every byte to a valid code point; this branch
+        # never raises further.
+        text = raw_bytes.decode("latin-1")
+    text = _normalise_whitespace(text)
+
+    title = path.stem
+    metadata: dict[str, Any] = {
+        "title": title,
+        "page_description": "",
+        "heading_path": title,
+        "links_to": [],
+        "file_type": "text",
+        "code_blocks": [],
+    }
+    return Document(path=path.resolve(), content=text, metadata=metadata)
+
+
+# ---------------------------------------------------------------------------
 # Step 1: strip invisible / boilerplate
 # ---------------------------------------------------------------------------
 

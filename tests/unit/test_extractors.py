@@ -431,6 +431,108 @@ def test_document_metadata_keys(tmp_path, config):
 
 
 # ---------------------------------------------------------------------------
+# Plain-text extractor (Feature 0001)
+# ---------------------------------------------------------------------------
+
+
+def _write_text(tmp_path: Path, name: str, body: bytes | str) -> Path:
+    p = tmp_path / name
+    if isinstance(body, bytes):
+        p.write_bytes(body)
+    else:
+        p.write_text(body, encoding="utf-8")
+    return p
+
+
+def test_extract_text_utf8_round_trip(tmp_path, config):
+    from arg.crawler.extractors import extract_text
+
+    p = _write_text(tmp_path, "release_notes.txt", "First line\nSecond line\n")
+    doc = extract_text(p, config)
+    assert "First line" in doc.content
+    assert "Second line" in doc.content
+    assert doc.metadata["file_type"] == "text"
+
+
+def test_extract_text_title_from_filename_stem(tmp_path, config):
+    from arg.crawler.extractors import extract_text
+
+    p = _write_text(tmp_path, "my_release_notes.txt", "hi")
+    doc = extract_text(p, config)
+    assert doc.metadata["title"] == "my_release_notes"
+
+
+def test_extract_text_empty_file(tmp_path, config):
+    from arg.crawler.extractors import extract_text
+
+    p = _write_text(tmp_path, "blank.txt", "")
+    doc = extract_text(p, config)
+    assert doc.content == ""
+    assert doc.metadata["title"] == "blank"
+
+
+def test_extract_text_strips_utf8_bom(tmp_path, config):
+    from arg.crawler.extractors import extract_text
+
+    p = _write_text(
+        tmp_path,
+        "bommed.txt",
+        b"\xef\xbb\xbfBOM-prefixed content stays clean.\n",
+    )
+    doc = extract_text(p, config)
+    assert doc.content.startswith("BOM-prefixed content")
+    # No leading BOM character.
+    assert doc.content[0] != "﻿"
+
+
+def test_extract_text_latin1_fallback(tmp_path, config):
+    """Bytes that aren't valid UTF-8 fall through to latin-1 decode."""
+    from arg.crawler.extractors import extract_text
+
+    # 0xe9 is é in latin-1; it is NOT a valid standalone UTF-8 byte.
+    p = _write_text(tmp_path, "win1252.txt", b"caf\xe9 au lait\n")
+    doc = extract_text(p, config)
+    # latin-1 maps 0xe9 → é, so the round-trip should contain a literal é.
+    assert "café" in doc.content
+
+
+def test_extract_text_metadata_shape(tmp_path, config):
+    from arg.crawler.extractors import extract_text
+
+    p = _write_text(tmp_path, "x.txt", "body")
+    doc = extract_text(p, config)
+    for key in (
+        "title",
+        "page_description",
+        "heading_path",
+        "links_to",
+        "file_type",
+        "code_blocks",
+    ):
+        assert key in doc.metadata, f"missing metadata key {key}"
+    assert doc.metadata["page_description"] == ""
+    assert doc.metadata["links_to"] == []
+    assert doc.metadata["code_blocks"] == []
+    assert doc.metadata["file_type"] == "text"
+    assert doc.metadata["heading_path"] == "x"
+
+
+def test_extract_text_accepts_md_and_markdown(tmp_path, config):
+    """``.md`` and ``.markdown`` flow through extract_text unchanged.
+    Markdown semantic structure (``# H1``) is intentionally NOT parsed in
+    Feature 0001; the literal ``#`` characters appear in the content."""
+    from arg.crawler.extractors import extract_text
+
+    md_path = _write_text(tmp_path, "x.md", "# Heading\n\nbody\n")
+    doc = extract_text(md_path, config)
+    assert "# Heading" in doc.content
+
+    long_path = _write_text(tmp_path, "x.markdown", "## Sub heading\nbody\n")
+    doc = extract_text(long_path, config)
+    assert "## Sub heading" in doc.content
+
+
+# ---------------------------------------------------------------------------
 # PDF — pure helper tests (no fixture PDF needed)
 # ---------------------------------------------------------------------------
 
