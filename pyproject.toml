@@ -105,4 +105,5 @@ addopts = [
 markers = [
     "integration: integration tests (require local services)",
     "e2e: end-to-end tests (require Ollama running with llama3.3 + nomic-embed-text)",
+    "pdf: tests that require the PDF extractor (skipped in HTML pass of Section 5)",
 ]

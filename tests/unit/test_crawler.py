@@ -1,0 +1,238 @@
+"""Crawler tests — link normalisation, dedup, dir-walk fallback, depth cap."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from arg.config import ARGConfig
+from arg.crawler.crawler import crawl, normalise_href
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def docs_root(tmp_path: Path) -> Path:
+    root = tmp_path / "docs"
+    root.mkdir()
+    return root
+
+
+@pytest.fixture
+def config(tmp_path: Path, docs_root: Path) -> ARGConfig:
+    return ARGConfig(docs_root=docs_root, db_path=tmp_path / "arg_db")
+
+
+def write(path: Path, content: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def html_with_links(*hrefs: str, body: str = "body") -> str:
+    anchors = "".join(f'<a href="{h}">link</a>' for h in hrefs)
+    return f"<html><body><h1>page</h1>{anchors}<p>{body}</p></body></html>"
+
+
+def _paths(docs) -> set[str]:
+    return {d.path.name for d in docs}
+
+
+# ---------------------------------------------------------------------------
+# normalise_href unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "#section",
+        "#",
+        "mailto:foo@bar.com",
+        "javascript:void(0)",
+        "tel:+15555550100",
+        "ftp://ftp.example.com/x.html",
+        "//cdn.example.com/page.html",
+        "http://example.com/x.html",
+        "https://example.com/x.html",
+        "",
+        "   ",
+    ],
+)
+def test_normalise_href_rejects(href, docs_root):
+    src = docs_root / "index.html"
+    src.touch()
+    assert normalise_href(href, src.resolve(), docs_root.resolve()) is None
+
+
+def test_normalise_href_rejects_path_escape(docs_root, tmp_path):
+    # Sibling file outside docs_root.
+    sibling = tmp_path / "evil.html"
+    sibling.write_text("nope")
+    src = docs_root / "index.html"
+    src.touch()
+    assert normalise_href("../evil.html", src.resolve(), docs_root.resolve()) is None
+
+
+def test_normalise_href_rejects_unindexable_suffix(docs_root):
+    write(docs_root / "image.png", "binary")
+    src = docs_root / "index.html"
+    src.touch()
+    assert normalise_href("image.png", src.resolve(), docs_root.resolve()) is None
+
+
+def test_normalise_href_accepts_relative_html(docs_root):
+    write(docs_root / "page.html", "<html><body>x</body></html>")
+    src = docs_root / "index.html"
+    src.touch()
+    result = normalise_href("page.html", src.resolve(), docs_root.resolve())
+    assert result == (docs_root / "page.html").resolve()
+
+
+def test_normalise_href_strips_fragment(docs_root):
+    write(docs_root / "page.html", "<html><body>x</body></html>")
+    src = docs_root / "index.html"
+    src.touch()
+    result = normalise_href("page.html#section-2", src.resolve(), docs_root.resolve())
+    assert result == (docs_root / "page.html").resolve()
+
+
+def test_normalise_href_accepts_pdf(docs_root):
+    write(docs_root / "manual.pdf", "%PDF")
+    src = docs_root / "index.html"
+    src.touch()
+    result = normalise_href("manual.pdf", src.resolve(), docs_root.resolve())
+    assert result is not None
+    assert result.suffix == ".pdf"
+
+
+# ---------------------------------------------------------------------------
+# Crawl: link-following
+# ---------------------------------------------------------------------------
+
+
+def test_crawl_finds_linked_documents(docs_root, config):
+    write(docs_root / "index.html", html_with_links("page_a.html", "page_b.html"))
+    write(docs_root / "page_a.html", html_with_links("page_b.html"))
+    write(docs_root / "page_b.html", html_with_links())
+
+    docs = list(crawl(docs_root, config))
+    assert _paths(docs) == {"index.html", "page_a.html", "page_b.html"}
+
+
+def test_crawl_dedupes_circular_links(docs_root, config):
+    write(docs_root / "index.html", html_with_links("a.html"))
+    write(docs_root / "a.html", html_with_links("b.html"))
+    write(docs_root / "b.html", html_with_links("a.html", "index.html"))
+
+    docs = list(crawl(docs_root, config))
+    # Three files, each yielded exactly once.
+    assert len(docs) == 3
+    assert _paths(docs) == {"index.html", "a.html", "b.html"}
+
+
+def test_crawl_finds_unlinked_files_via_dirwalk(docs_root, config):
+    write(docs_root / "index.html", html_with_links())  # no links
+    write(docs_root / "orphan.html", "<html><body>orphan</body></html>")
+
+    docs = list(crawl(docs_root, config))
+    assert _paths(docs) == {"index.html", "orphan.html"}
+
+
+def test_crawl_skips_non_html_files_in_dirwalk(docs_root, config):
+    write(docs_root / "index.html", html_with_links())
+    write(docs_root / "data.csv", "a,b,c")
+    write(docs_root / "img.png", "binary")
+
+    docs = list(crawl(docs_root, config))
+    assert _paths(docs) == {"index.html"}
+
+
+# ---------------------------------------------------------------------------
+# Crawl: hostile hrefs do not exit docs_root
+# ---------------------------------------------------------------------------
+
+
+def test_crawl_does_not_follow_external_links(docs_root, config):
+    write(
+        docs_root / "index.html",
+        html_with_links(
+            "http://example.com/evil.html",
+            "https://example.com/evil.html",
+            "//cdn.example.com/x.html",
+            "mailto:foo@bar.com",
+            "javascript:void(0)",
+            "tel:+15555550100",
+            "#anchor",
+        ),
+    )
+    docs = list(crawl(docs_root, config))
+    assert _paths(docs) == {"index.html"}
+    # links_to must be empty (all hostile hrefs rejected).
+    assert docs[0].metadata["links_to"] == []
+
+
+def test_crawl_does_not_follow_path_escape(docs_root, tmp_path, config):
+    # Put a file outside docs_root that we must NEVER reach.
+    outside = tmp_path / "outside.html"
+    outside.write_text("<html><body>SECRET_OUTSIDE_DOCS</body></html>")
+
+    write(
+        docs_root / "index.html",
+        html_with_links("../outside.html"),
+    )
+    docs = list(crawl(docs_root, config))
+    assert all("SECRET_OUTSIDE_DOCS" not in d.content for d in docs)
+    assert _paths(docs) == {"index.html"}
+
+
+# ---------------------------------------------------------------------------
+# Crawl: depth cap
+# ---------------------------------------------------------------------------
+
+
+def test_crawl_respects_max_file_depth(docs_root, tmp_path):
+    """max_file_depth caps directory recursion; deeper files are skipped."""
+    write(docs_root / "index.html", html_with_links("sub/level1.html"))
+    write(docs_root / "sub" / "level1.html", html_with_links("../deep/level2.html"))
+    write(docs_root / "deep" / "level2.html", html_with_links("nested/level3.html"))
+    write(docs_root / "deep" / "nested" / "level3.html", "<html><body>too deep</body></html>")
+
+    capped = ARGConfig(docs_root=docs_root, db_path=tmp_path / "arg_db", max_file_depth=1)
+    docs = list(crawl(docs_root, capped))
+    names = _paths(docs)
+    # level3.html is at depth 2 (deep/nested/level3.html); should be excluded.
+    assert "level3.html" not in names
+    assert "level1.html" in names
+    assert "level2.html" in names
+
+
+# ---------------------------------------------------------------------------
+# Link normalisation in Document.metadata["links_to"]
+# ---------------------------------------------------------------------------
+
+
+def test_links_to_normalised_to_absolute_paths(docs_root, config):
+    write(docs_root / "index.html", html_with_links("a.html", "sub/b.html"))
+    write(docs_root / "a.html", "<html><body>a</body></html>")
+    write(docs_root / "sub" / "b.html", "<html><body>b</body></html>")
+
+    docs = list(crawl(docs_root, config))
+    index = next(d for d in docs if d.path.name == "index.html")
+    links = set(index.metadata["links_to"])
+    assert str((docs_root / "a.html").resolve()) in links
+    assert str((docs_root / "sub" / "b.html").resolve()) in links
+
+
+def test_links_to_includes_pdf_edges_even_when_pdf_not_yielded(docs_root, config):
+    """Pass-1 contract: PDF target is recorded in links_to even though crawler
+    does not yield a Document for it yet (PDF extractor lands in pass 2)."""
+    write(docs_root / "index.html", html_with_links("manual.pdf"))
+    write(docs_root / "manual.pdf", "%PDF")
+    docs = list(crawl(docs_root, config))
+    assert _paths(docs) == {"index.html"}
+    index = docs[0]
+    assert str((docs_root / "manual.pdf").resolve()) in index.metadata["links_to"]

@@ -1,0 +1,190 @@
+"""Recursive document crawler.
+
+The crawler is the boundary between the file system and the rest of ARG. It
+turns a docs root directory into an ordered stream of `Document` objects:
+
+  1. Resolves the root and walks the link graph starting at ``index.html`` (if
+     present), then performs a directory walk to pick up any indexable files
+     not reachable via links.
+  2. Normalises every ``<a href>`` it sees, refusing to follow anchors,
+     mailto/javascript/tel/ftp/protocol-relative URLs, http(s) externals, and
+     paths that escape ``docs_root`` (path-escape attacks).
+  3. De-duplicates files by their resolved absolute path so circular links
+     (A → B → A) don't loop.
+  4. Caps recursion via ``config.max_file_depth``.
+
+In the HTML-only pass, PDF files are recorded as graph edges (their resolved
+paths appear in the ``links_to`` lists of HTML documents that linked to them)
+but the crawler does not yet yield a `Document` for them — that lands when the
+PDF extractor is implemented in pass 2 of Section 5.
+
+Locality
+--------
+Every following decision goes through `normalise_href`, which strips http/https
+schemes and any path that escapes ``docs_root``. Combined with the
+``ARGConfig.ollama_base_url`` localhost check, this is one of the layers that
+makes ARG's locality guarantee hold even when the corpus contains links to the
+public internet.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections import deque
+from collections.abc import Iterator
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from arg.config import ARGConfig
+from arg.crawler.extractors import Document, extract_html
+
+logger = logging.getLogger(__name__)
+
+_INDEXABLE_SUFFIXES: frozenset[str] = frozenset({".html", ".htm", ".pdf"})
+_HTML_SUFFIXES: frozenset[str] = frozenset({".html", ".htm"})
+_SKIP_SCHEMES: frozenset[str] = frozenset({"mailto", "javascript", "tel", "ftp", "http", "https"})
+
+
+def normalise_href(href: str, source_path: Path, docs_root: Path) -> Path | None:
+    """Resolve a raw ``<a href>`` to an absolute Path inside ``docs_root``.
+
+    Returns ``None`` if the href should be skipped per the Section 5 spec.
+    Both ``source_path`` and ``docs_root`` must already be absolute.
+    """
+    if not href:
+        return None
+    href = href.strip()
+    if not href:
+        return None
+
+    # Anchor-only link.
+    if href.startswith("#"):
+        return None
+
+    # Protocol-relative (//cdn.example.com/...). Always external; never a local file.
+    if href.startswith("//"):
+        return None
+
+    # `urlsplit` happily parses bare paths (scheme == "") and absolute file URIs.
+    parts = urlsplit(href)
+    scheme = parts.scheme.lower()
+    if scheme in _SKIP_SCHEMES:
+        return None
+    # Any other non-empty scheme we don't recognise → external, skip.
+    if scheme and scheme != "file":
+        return None
+
+    # Fragments are discarded — they don't change the target file.
+    target = parts.path
+    if not target:
+        return None
+
+    # Resolve relative to the source file's directory; absolute paths are honoured.
+    candidate = Path(target)
+    if not candidate.is_absolute():
+        candidate = source_path.parent / candidate
+    resolved = candidate.resolve()
+
+    # Path-escape guard: must be inside docs_root.
+    try:
+        resolved.relative_to(docs_root)
+    except ValueError:
+        return None
+
+    if resolved.suffix.lower() not in _INDEXABLE_SUFFIXES:
+        return None
+
+    return resolved
+
+
+def _relative_dir_depth(path: Path, docs_root: Path) -> int:
+    """Number of directory levels under ``docs_root`` (0 for top-level files)."""
+    try:
+        rel = path.relative_to(docs_root)
+    except ValueError:
+        return -1
+    return len(rel.parts) - 1
+
+
+def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
+    """Walk ``docs_root`` and yield `Document` objects.
+
+    Yields HTML documents in BFS order starting from ``index.html`` (if it
+    exists), then any unreached HTML files discovered by directory walk in
+    sorted order. ``links_to`` in each Document's metadata is normalised to a
+    list of absolute path strings — non-followable hrefs are dropped.
+
+    Pass 1: PDF files are not yielded as Documents; they appear only as edges
+    in other documents' ``links_to``.
+    """
+    docs_root = docs_root.resolve()
+    if not docs_root.is_dir():
+        raise NotADirectoryError(f"docs_root is not a directory: {docs_root}")
+
+    seen: set[Path] = set()
+    queue: deque[Path] = deque()
+
+    index = docs_root / "index.html"
+    if index.is_file():
+        queue.append(index)
+
+    while queue:
+        path = queue.popleft()
+        if path in seen:
+            continue
+        seen.add(path)
+
+        if _relative_dir_depth(path, docs_root) > config.max_file_depth:
+            logger.debug("crawler: skipping %s (depth exceeds max_file_depth)", path)
+            continue
+
+        if path.suffix.lower() in _HTML_SUFFIXES:
+            doc = extract_html(path, config)
+            doc.metadata["links_to"] = _resolve_links(
+                doc.metadata.get("links_to", []), path, docs_root, seen, queue
+            )
+            yield doc
+        # PDF: edges recorded by HTML extractors; standalone yield deferred to pass 2.
+
+    # Directory walk for files unreachable from index.html.
+    for path in sorted(docs_root.rglob("*")):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix not in _HTML_SUFFIXES:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        if _relative_dir_depth(resolved, docs_root) > config.max_file_depth:
+            continue
+        seen.add(resolved)
+        doc = extract_html(resolved, config)
+        doc.metadata["links_to"] = _resolve_links(
+            doc.metadata.get("links_to", []), resolved, docs_root, seen, queue
+        )
+        yield doc
+
+
+def _resolve_links(
+    raw_hrefs: list[str],
+    source_path: Path,
+    docs_root: Path,
+    seen: set[Path],
+    queue: deque[Path],
+) -> list[str]:
+    """Normalise hrefs and enqueue followable HTML targets for traversal.
+
+    Returns the list of resolved absolute-path strings for the source's
+    ``links_to`` metadata (PDFs included — they are link-graph edges even when
+    the extractor for them hasn't landed).
+    """
+    out: list[str] = []
+    for href in raw_hrefs:
+        resolved = normalise_href(href, source_path, docs_root)
+        if resolved is None:
+            continue
+        out.append(str(resolved))
+        if resolved.suffix.lower() in _HTML_SUFFIXES and resolved not in seen:
+            queue.append(resolved)
+    return out
