@@ -220,6 +220,65 @@ def test_reindexing_unchanged_doc_is_a_noop(indexer, config):
     assert second.chunks_written == 0
 
 
+def test_hashes_persisted_incrementally_after_each_doc(indexer, config):
+    """Mid-run interruption recovery: hashes must hit disk per doc, not
+    just at the end of index(). A Ctrl-C / kill after doc N can then be
+    resumed by re-running index() — the first N docs are skipped."""
+    docs = [
+        _simple_doc(config.docs_root, "a.html"),
+        _simple_doc(config.docs_root, "b.html"),
+        _simple_doc(config.docs_root, "c.html"),
+    ]
+    # Capture the hash file state during the run by spying on _save_hashes.
+    save_counts: list[int] = []
+    original_save = indexer._save_hashes
+
+    def spy_save() -> None:
+        save_counts.append(len(indexer._hashes))
+        original_save()
+
+    indexer._save_hashes = spy_save  # type: ignore[method-assign, unused-ignore]
+    indexer.index(docs)
+    # Hashes should be saved at least once per doc (3) plus a final save at
+    # the end of index() — so >= 4 calls, each carrying a non-decreasing
+    # hash count.
+    assert len(save_counts) >= len(docs) + 1
+    assert save_counts == sorted(save_counts), "hash count must be monotonically non-decreasing"
+    assert save_counts[-1] == len(docs)
+
+
+def test_simulated_interruption_resumes_cleanly(indexer, config, monkeypatch):
+    """If the indexer dies after doc 1, a fresh indexer over the same
+    arg_db skips that doc on the next run."""
+    docs = [
+        _simple_doc(config.docs_root, "a.html"),
+        _simple_doc(config.docs_root, "b.html"),
+    ]
+    # Wire indexer._index_one to crash on the second doc.
+    real_index_one = indexer._index_one
+    seen: list[str] = []
+
+    def crashy_index_one(doc):
+        if "b.html" in str(doc.path):
+            raise RuntimeError("simulated crash mid-run")
+        seen.append(str(doc.path))
+        return real_index_one(doc)
+
+    monkeypatch.setattr(indexer, "_index_one", crashy_index_one)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        indexer.index(docs)
+    # The first doc was processed and its hash persisted.
+    assert len(seen) == 1
+    monkeypatch.undo()
+
+    # Fresh indexer over the same on-disk state: a.html is skipped, b.html
+    # gets indexed.
+    fresh = Indexer(config=config, knowledge_graph=indexer.kg, embedder=_FakeEmbedder())
+    stats = fresh.index(docs)
+    assert stats.documents_skipped == 1
+    assert stats.documents_indexed == 1
+
+
 def test_reindexing_changed_doc_updates_both_collections(indexer, config):
     doc = _make_doc(
         config.docs_root,

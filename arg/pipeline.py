@@ -445,8 +445,16 @@ class ARGPipeline:
             logger.debug("Could not register signal handlers: %s", exc)
 
     def _signal_handler(self, signum: int, frame: Any) -> None:  # pragma: no cover
+        """SIGTERM / SIGINT → close + raise KeyboardInterrupt.
+
+        The previous version called ``close()`` and returned, which let
+        Python resume the interrupted loop and made Ctrl-C effectively a
+        no-op during long indexing runs. Raising KeyboardInterrupt unwinds
+        the stack so the user actually exits.
+        """
         logger.info("Received signal %s — closing pipeline", signum)
         self.close()
+        raise KeyboardInterrupt(f"signal {signum}")
 
     # ------------------------------------------------------------------
     # Watcher callback

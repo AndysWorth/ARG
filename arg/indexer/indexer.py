@@ -138,15 +138,34 @@ class Indexer:
         LINKS_TO edges (so edge targets are guaranteed to exist as nodes).
         The BM25 index is rebuilt from the resulting ``chunks`` collection.
         """
+        import time as _time
+
         docs = list(documents)
+        total = len(docs)
         stats = IndexStats()
-        for doc in docs:
+        for i, doc in enumerate(docs, start=1):
             if self._is_unchanged(doc):
                 stats.documents_skipped += 1
+                logger.info("[%d/%d] skip (unchanged): %s", i, total, doc.path)
                 continue
+            t0 = _time.perf_counter()
             n_chunks = self._index_one(doc)
+            elapsed_ms = int((_time.perf_counter() - t0) * 1000)
             stats.documents_indexed += 1
             stats.chunks_written += n_chunks
+            logger.info(
+                "[%d/%d] indexed %s (%d chunks, %d ms)",
+                i,
+                total,
+                doc.path,
+                n_chunks,
+                elapsed_ms,
+            )
+            # Incrementally persist hashes so a Ctrl-C / kill mid-run lets the
+            # next ``index()`` skip everything already processed. Cheap on a
+            # per-doc basis (tens of KB of JSON); enormous saving if a run
+            # of 1000 docs gets interrupted at doc 700.
+            self._save_hashes()
 
         # Pass 2: links. We only record edges whose target was indexed —
         # external URL strings were already filtered by the crawler, but
