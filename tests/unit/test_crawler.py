@@ -271,6 +271,40 @@ def test_links_to_records_unreadable_pdf_as_edge_only(docs_root, config):
     assert str((docs_root / "broken.pdf").resolve()) in index.metadata["links_to"]
 
 
+def test_crawl_continues_when_extractor_raises(docs_root, config, monkeypatch, caplog):
+    """One malformed file must not abort the whole indexing run.
+
+    The crawler wraps extract_html / extract_pdf_to_document in a broad
+    try/except; the failing file is logged and the rest of the corpus
+    indexes normally.
+    """
+    write(docs_root / "index.html", html_with_links("a.html", "b.html"))
+    write(docs_root / "a.html", "<html><body>good a</body></html>")
+    write(docs_root / "b.html", "<html><body>good b</body></html>")
+
+    # Inject a synthetic crash for ``a.html`` only.
+    import arg.crawler.crawler as crawler_mod
+
+    real_extract = crawler_mod.extract_html
+
+    def boom(path, cfg):
+        if path.name == "a.html":
+            raise RuntimeError("synthetic malformed-HTML error")
+        return real_extract(path, cfg)
+
+    monkeypatch.setattr(crawler_mod, "extract_html", boom)
+
+    import logging
+
+    with caplog.at_level(logging.ERROR):
+        docs = list(crawl(docs_root, config))
+    names = _paths(docs)
+    assert "a.html" not in names, "the failing file should be skipped"
+    assert "index.html" in names
+    assert "b.html" in names
+    assert any("extractor failed" in rec.message for rec in caplog.records)
+
+
 def test_crawler_yields_pdf_document_for_valid_pdf(docs_root, config):
     """A valid PDF linked from index.html is yielded as a `file_type=pdf` Document."""
     import pymupdf as fitz

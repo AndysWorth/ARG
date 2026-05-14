@@ -183,9 +183,15 @@ _VISIBILITY_HIDDEN_RE = re.compile(r"visibility\s*:\s*hidden", re.IGNORECASE)
 def _strip_invisible_and_boilerplate(soup: BeautifulSoup, config: ARGConfig) -> None:
     for tag_name in _SEMANTIC_BOILERPLATE_TAGS:
         for tag in soup.find_all(tag_name):
-            tag.decompose()
+            if isinstance(tag, Tag):
+                tag.decompose()
 
+    # Malformed HTML can surface nodes from ``find_all(attrs=...)`` where
+    # ``.attrs is None`` — calling ``.get()`` on them raises AttributeError
+    # mid-iteration. Guard with isinstance + attrs presence.
     for tag in soup.find_all(attrs={"style": True}):
+        if not isinstance(tag, Tag) or tag.attrs is None:
+            continue
         style = tag.get("style", "")
         if not isinstance(style, str):
             continue

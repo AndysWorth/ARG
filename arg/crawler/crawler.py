@@ -181,10 +181,19 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
 
 def _extract_for_path(path: Path, config: ARGConfig) -> Document | None:
     suffix = path.suffix.lower()
-    if suffix in _HTML_SUFFIXES:
-        return extract_html(path, config)
-    if suffix == ".pdf":
-        return extract_pdf_to_document(path, config)
+    try:
+        if suffix in _HTML_SUFFIXES:
+            return extract_html(path, config)
+        if suffix == ".pdf":
+            return extract_pdf_to_document(path, config)
+    except FileNotFoundError as exc:
+        # A link or directory walk pointed at a path that's no longer there
+        # (race with the watcher, broken symlink, etc.).
+        logger.warning("crawler: file disappeared during extraction: %s (%s)", path, exc)
+    except Exception as exc:
+        # Malformed HTML / PDF that the extractor can't handle. Real-world
+        # corpora carry these; one bad file must not kill the whole index.
+        logger.exception("crawler: extractor failed for %s (%s); skipping", path, exc)
     return None
 
 

@@ -144,6 +144,46 @@ def test_default_strip_selectors_list_non_empty():
     assert "div.md-sidebar" in DEFAULT_STRIP_SELECTORS
 
 
+def test_strip_invisible_handles_nodes_with_none_attrs(tmp_path, config, monkeypatch):
+    """Real-world malformed HTML can surface nodes from ``find_all`` whose
+    ``.attrs`` is None — calling ``.get('style', '')`` on them raises
+    AttributeError. The extractor must guard against this rather than
+    crashing the whole indexing run."""
+    import arg.crawler.extractors as extractors_mod
+
+    real_bs = extractors_mod.BeautifulSoup
+
+    def bad_bs(*args, **kwargs):
+        soup = real_bs(*args, **kwargs)
+        real_find_all = soup.find_all
+
+        def wrapped_find_all(*a, **kw):
+            results = real_find_all(*a, **kw)
+            # When find_all is called for style-bearing tags, inject a
+            # synthetic Tag whose attrs is None — the malformed-HTML
+            # symptom we saw in the wild.
+            if kw.get("attrs") == {"style": True}:
+                from bs4 import Tag
+
+                broken = Tag(name="div")
+                broken.attrs = None  # type: ignore[assignment, unused-ignore]
+                return [*results, broken]
+            return results
+
+        soup.find_all = wrapped_find_all  # type: ignore[method-assign, unused-ignore]
+        return soup
+
+    monkeypatch.setattr(extractors_mod, "BeautifulSoup", bad_bs)
+    # If the guard fails this raises AttributeError; if it works the
+    # extract returns normally.
+    doc = _extract(
+        tmp_path,
+        '<html><body><p style="color:red">hi</p></body></html>',
+        config,
+    )
+    assert "hi" in doc.content
+
+
 # ---------------------------------------------------------------------------
 # Parser choice
 # ---------------------------------------------------------------------------
