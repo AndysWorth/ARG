@@ -35,6 +35,7 @@ import pytest
 
 from arg.config import ARGConfig
 from arg.embeddings import Embedder
+from arg.llm import LLM
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -183,6 +184,55 @@ def ollama_embedder(ollama_available: bool) -> Embedder:
 
         def embed_batch(self, texts: list[str]) -> list[list[float]]:
             return [list(v) for v in embedding.get_text_embedding_batch(texts)]
+
+    return _Adapter()
+
+
+# ---------------------------------------------------------------------------
+# Real Ollama LLM (skips when llama3.3:70b not pulled)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def llama_model_available(ollama_available: bool) -> bool:
+    """True when llama3.3:70b-instruct-q4_K_M is in ``ollama list``."""
+    if not ollama_available:
+        return False
+    import shutil
+    import subprocess
+
+    if not shutil.which("ollama"):
+        return False
+    result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=False)
+    return "llama3.3:70b-instruct-q4_K_M" in (result.stdout or "")
+
+
+@pytest.fixture(scope="session")
+def real_llm(llama_model_available: bool) -> LLM:
+    """Adapter around llama-index's Ollama LLM pointed at the local daemon.
+
+    Skips when the llama3.3 model isn't pulled — answer quality tests can't
+    run without it. Session-scoped because the model warm-up is the slow part.
+    """
+    if not llama_model_available:
+        pytest.skip("llama3.3:70b-instruct-q4_K_M not pulled in Ollama")
+    from llama_index.llms.ollama import Ollama
+
+    client = Ollama(
+        model="llama3.3:70b-instruct-q4_K_M",
+        base_url="http://localhost:11434",
+        request_timeout=180.0,
+    )
+
+    class _Adapter:
+        def complete(self, prompt: str) -> str:
+            return str(client.complete(prompt))
+
+        def stream_complete(self, prompt: str) -> Iterator[str]:
+            for chunk in client.stream_complete(prompt):
+                text = getattr(chunk, "delta", None) or getattr(chunk, "text", "")
+                if text:
+                    yield str(text)
 
     return _Adapter()
 

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hydra Scheduler — Workers</title>
+  <meta name="description" content="Hydra Scheduler is a job scheduler for distributed workloads." />
+</head>
+<body>
+  <h1>Hydra Scheduler — Workers</h1>
+  <p>Hydra Scheduler workers are stateless container runtimes that pull scheduled tasks from the Hydra Scheduler priority queue. Hydra Scheduler worker pools are sized by concurrency limits per pool; the Hydra Scheduler control plane enforces fair-share dispatch across pools. Hydra Scheduler workers report task heartbeats every five seconds over the long-poll gRPC stream; missed heartbeats cause Hydra Scheduler to reassign in-flight tasks to a different worker.</p>
+
+</body>
+</html>

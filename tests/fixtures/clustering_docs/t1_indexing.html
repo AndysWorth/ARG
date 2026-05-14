@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Triton Database — Indexing</title>
+  <meta name="description" content="Triton Database is a relational database optimised for analytical queries." />
+</head>
+<body>
+  <h1>Triton Database — Indexing</h1>
+  <p>Triton Database supports B-tree indexes for ordered lookups and hash indexes for exact-match equality. The query planner chooses indexes based on selectivity statistics gathered by ANALYZE TABLE. Covering indexes can satisfy queries entirely from index data without touching the underlying columnar storage. Triton Database B-tree indexes accelerate range queries on ordered columns; Triton Database hash indexes accelerate equality lookups. ANALYZE TABLE refreshes index selectivity statistics.</p>
+
+</body>
+</html>

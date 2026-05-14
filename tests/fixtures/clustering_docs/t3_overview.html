@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hydra Scheduler — Overview</title>
+  <meta name="description" content="Hydra Scheduler is a job scheduler for distributed workloads." />
+</head>
+<body>
+  <h1>Hydra Scheduler — Overview</h1>
+  <p>Hydra Scheduler is a distributed cron-style task orchestrator built for batch workloads. Hydra Scheduler dispatches scheduled tasks to a fleet of stateless workers; tasks declare CPU and memory resource requirements and Hydra Scheduler bin-packs them onto the worker pool. The Hydra Scheduler control plane is a Raft-replicated leader that owns the priority queue and the cron trigger calendar. Workers pull tasks from Hydra Scheduler over a long-poll gRPC stream and report task heartbeats back to the leader.</p>
+  <h2>See also</h2>
+  <ul>
+    <li><a href="t3_jobs.html">T3_Jobs</a></li>
+    <li><a href="t3_triggers.html">T3_Triggers</a></li>
+  </ul>
+</body>
+</html>

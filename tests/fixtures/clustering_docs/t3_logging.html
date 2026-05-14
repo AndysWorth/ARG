@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hydra Scheduler — Logging and Alerts</title>
+  <meta name="description" content="Hydra Scheduler is a job scheduler for distributed workloads." />
+</head>
+<body>
+  <h1>Hydra Scheduler — Logging and Alerts</h1>
+  <p>Hydra Scheduler logs every task execution including the dispatched command, container image, exit code, stderr stream, and total task duration. Failed Hydra Scheduler tasks trigger alerts over operator-configured channels (email, Slack, PagerDuty). Hydra Scheduler tasks that exceed their declared duration budget log a soft warning every five minutes until the task completes or hits its hard timeout. The Hydra Scheduler task history is retained for 90 days for post-mortem analysis.</p>
+
+</body>
+</html>
