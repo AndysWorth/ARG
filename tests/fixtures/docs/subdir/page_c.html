@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Error Codes | Kraken API Docs</title>
+  <meta name="description" content="HTTP status codes and Kraken-specific error codes returned by the API." />
+</head>
+<body>
+  <h1>Error Codes</h1>
+
+  <p>
+    Every Kraken API endpoint returns standard HTTP status codes. Authentication
+    failures surface as 401; missing permissions as 403; missing resources as 404.
+    Rate-limit exhaustion surfaces as 429 with the
+    <code>X-Rate-Limit-Retry-After</code> header described in the rate-limit
+    documentation.
+  </p>
+
+  <h2>HTTP status codes</h2>
+  <ul>
+    <li><strong>200</strong> — request succeeded</li>
+    <li><strong>400</strong> — malformed request body or query parameters</li>
+    <li><strong>401</strong> — missing or invalid API key</li>
+    <li><strong>403</strong> — key valid but lacks the requested permission</li>
+    <li><strong>404</strong> — resource does not exist</li>
+    <li><strong>429</strong> — rate-limit exceeded; check Retry-After header</li>
+    <li><strong>500</strong> — internal server error; retry with backoff</li>
+  </ul>
+
+  <h2>Kraken error codes</h2>
+  <p>
+    On any 4xx response, the JSON body includes a Kraken-specific
+    <code>error_code</code> field. Codes are documented below.
+  </p>
+  <ul>
+    <li><strong>KRK-001</strong> — invalid API key format</li>
+    <li><strong>KRK-002</strong> — API key expired (rotate via dashboard)</li>
+    <li><strong>KRK-003</strong> — OAuth token expired (refresh with the refresh token)</li>
+    <li><strong>KRK-101</strong> — request body missing required field</li>
+    <li><strong>KRK-201</strong> — rate limit exceeded for this account tier</li>
+  </ul>
+</body>
+</html>

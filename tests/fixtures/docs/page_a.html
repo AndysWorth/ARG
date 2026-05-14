@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Kraken API — Authentication | Kraken API Docs</title>
+  <meta name="description" content="Authentication flows for the Kraken API: API keys, OAuth tokens, expiry." />
+</head>
+<body>
+  <!-- div-based sidebar that the strip_selectors list should remove -->
+  <div class="sphinxsidebar">
+    <h3>Navigation</h3>
+    <ul>
+      <li><a href="page_b.html">Rate Limits</a></li>
+      <li><a href="subdir/page_c.html">Error Codes</a></li>
+      <li>SIDEBAR_JUNK_TOKEN that must not appear in any indexed chunk</li>
+    </ul>
+  </div>
+
+  <h1>Authentication</h1>
+
+  <p>
+    The Kraken API authenticates every request with either an API key or an
+    OAuth bearer token. API keys are issued from the developer dashboard and
+    must be sent in the <code>X-Kraken-Key</code> header on every request.
+  </p>
+
+  <span style="display:none">HIDDEN_DISPLAY_NONE_TOKEN — must not be indexed.</span>
+
+  <h2>API key flow</h2>
+  <p>
+    Generate a key with the <code>POST /v2/keys</code> endpoint. Keys expire after
+    90 days unless rotated. Lost keys are revoked individually; a compromised
+    account can revoke all keys with one call.
+  </p>
+
+  <h2>OAuth flow</h2>
+  <p>
+    Production integrations use OAuth 2.0 with the authorization-code grant.
+    Access tokens expire after 3600 seconds; refresh tokens last 30 days. Both
+    are issued by <code>POST /v2/oauth/token</code>.
+  </p>
+
+  <h3>Example request</h3>
+  <pre>curl -X POST https://api.kraken.example/v2/oauth/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "grant_type=authorization_code&amp;code=abc123&amp;client_id=kraken-dev"</pre>
+
+  <p>See also: <a href="page_b.html">Rate limits</a>.</p>
+</body>
+</html>

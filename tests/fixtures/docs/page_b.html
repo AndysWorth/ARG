@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rate Limits | Kraken API Docs</title>
+  <meta name="description" content="Per-tier rate limits and X-Rate-Limit-Retry-After header semantics." />
+</head>
+<body>
+  <h1>Rate Limits</h1>
+
+  <p>
+    Every Kraken API account is assigned a tier that bounds requests per
+    minute, requests per day, and burst capacity. When a caller exceeds its
+    bound the server responds with HTTP 429 and an
+    <code>X-Rate-Limit-Retry-After</code> header carrying the number of
+    seconds to wait before retrying.
+  </p>
+
+  <h2>Per-tier limits</h2>
+  <table>
+    <tr><th>Tier</th><th>Requests per minute</th><th>Requests per day</th><th>Burst</th></tr>
+    <tr><td>Free</td><td>60</td><td>10000</td><td>120</td></tr>
+    <tr><td>Tier 2</td><td>500</td><td>200000</td><td>1000</td></tr>
+    <tr><td>Tier 3</td><td>1500</td><td>2000000</td><td>3000</td></tr>
+  </table>
+
+  <h2>Retry semantics</h2>
+  <p>
+    On a 429 response, callers must wait at least the
+    <code>X-Rate-Limit-Retry-After</code> value before retrying. The header is
+    expressed in whole seconds and never exceeds 600.
+  </p>
+
+  <p>Back to <a href="index.html">Index</a>.</p>
+</body>
+</html>
