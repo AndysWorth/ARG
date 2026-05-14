@@ -152,6 +152,24 @@ def test_configure_logging_idempotent_replaces_existing_handler(config):
                 handler.close()
 
 
+def test_configure_logging_overrides_prior_root_level(config):
+    """A prior ``logging.basicConfig(level=WARNING)`` (or anything else)
+    must not suppress INFO messages once ``configure_logging`` has run.
+    Without this contract the indexer's per-doc progress lines stay
+    invisible — regression caught in the wild after Feature 0001."""
+    root = stdlib_logging.getLogger()
+    root.setLevel(stdlib_logging.WARNING)  # simulate a stale basicConfig
+    try:
+        configure_logging(config, corpus_name="default")
+        assert root.level == stdlib_logging.INFO
+    finally:
+        for handler in list(root.handlers):
+            if getattr(handler, "_arg_handler_name", None) == "arg-json-rotating":
+                root.removeHandler(handler)
+                handler.close()
+        root.setLevel(stdlib_logging.NOTSET)
+
+
 # ---------------------------------------------------------------------------
 # enable_debug_tracing
 # ---------------------------------------------------------------------------

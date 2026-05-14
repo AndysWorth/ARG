@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging as stdlib_logging
 import sys
 from pathlib import Path
 
@@ -152,7 +151,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    stdlib_logging.basicConfig(level=stdlib_logging.WARNING)
+    # Each subcommand calls ``configure_logging`` itself which installs the
+    # ARG rotating-JSON handler at INFO level. No basicConfig() here — it
+    # would just set a WARNING root level that configure_logging would have
+    # to fight.
     return int(args.func(args))
 
 

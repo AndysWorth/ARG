@@ -124,8 +124,8 @@ def configure_logging(
     # Tag the handler so a re-configure call can recognise + remove it.
     rotator._arg_handler_name = _HANDLER_NAME  # type: ignore[attr-defined]
     root.addHandler(rotator)
-    if level is not None:
-        root.setLevel(level)
-    elif not root.level:
-        root.setLevel(stdlib_logging.INFO)
+    # Always set INFO when no explicit level was passed. The previous
+    # "only set if unset" behaviour silently inherited any prior
+    # basicConfig(level=WARNING) and suppressed indexer progress messages.
+    root.setLevel(level if level is not None else stdlib_logging.INFO)
     return log_path
