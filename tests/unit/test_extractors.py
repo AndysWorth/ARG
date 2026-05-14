@@ -750,12 +750,18 @@ def test_extract_pdf_is_a_generator(tmp_path, config):
 def test_extract_pdf_yields_tuples(tmp_path, config):
     from arg.crawler.extractors import extract_pdf
 
-    pdf = _native_pdf(tmp_path / "doc.pdf", body="page one body")
+    # Body must clear the OCR character threshold so pdfplumber wins; on CI the
+    # tesseract binary is absent so falling through to OCR yields empty text.
+    body = (
+        "PAGE_ONE_MARKER appears here and the surrounding paragraph supplies "
+        "enough body chars to comfortably exceed the default OCR threshold."
+    )
+    pdf = _native_pdf(tmp_path / "doc.pdf", body=body)
     pages = list(extract_pdf(pdf, config))
     assert len(pages) == 1
     page_num, text, meta = pages[0]
     assert page_num == 1
-    assert "page one body" in text
+    assert "PAGE_ONE_MARKER" in text
     for key in ("tables", "ocr_used", "char_count", "heading_sentinels"):
         assert key in meta
 
@@ -849,9 +855,15 @@ def test_pdf_sidecar_malformed_logs_and_returns_empty(tmp_path, caplog):
 def test_extract_pdf_to_document_assembles_document(tmp_path, config):
     from arg.crawler.extractors import extract_pdf_to_document
 
+    # Body must clear the OCR threshold; CI runners do not have tesseract
+    # installed, so falling through to OCR would yield empty content.
+    body = (
+        "LINE_ONE_MARKER opens the document.\n"
+        "A second prose line keeps total character count above the OCR threshold."
+    )
     pdf = _native_pdf(
         tmp_path / "doc.pdf",
-        body="line one\nline two",
+        body=body,
         title="Doc Title",
         subject="doc subject",
         keywords="kw",
@@ -863,6 +875,6 @@ def test_extract_pdf_to_document_assembles_document(tmp_path, config):
     assert doc.metadata["keywords"] == "kw"
     assert doc.metadata["file_type"] == "pdf"
     assert doc.metadata["page_count"] == 1
-    assert "line one" in doc.content
+    assert "LINE_ONE_MARKER" in doc.content
     assert isinstance(doc.metadata["page_metadata"], list)
     assert doc.metadata["page_metadata"][0]["page_number"] == 1
