@@ -112,7 +112,7 @@ class ARGConfig:
     min_cluster_docs: int = 10
 
     # --- Crawler ----------------------------------------------------------
-    max_file_depth: int = 10
+    max_file_depth: int = 100
 
     # --- HTML extraction --------------------------------------------------
     strip_selectors: list[str] | None = None
