@@ -236,18 +236,26 @@ class ARGPipeline:
 
     def _default_embedder(self) -> Embedder:
         """Construct an Ollama embedder pointed at ``config.ollama_base_url``."""
+        import tiktoken as _tiktoken
         from ollama import Client as _OllamaClient
 
-        # Use the Ollama client directly rather than LlamaIndex's wrapper so we
-        # can pass truncate=True — LlamaIndex's OllamaEmbedding never sets it,
-        # meaning any text that exceeds the model's context raises a 400 instead
-        # of being silently clipped. num_ctx=8192 uses nomic-embed-text's full
-        # context; truncate=True is the safety net if it's still exceeded.
         _client = _OllamaClient(host=self.config.ollama_base_url)
         _model = self.config.embed_model
+        _enc = _tiktoken.get_encoding("cl100k_base")
+
+        # nomic-embed-text's GGUF build enforces a 2048-token architecture
+        # limit regardless of the num_ctx Modelfile setting, and Ollama 0.21
+        # does not honour truncate=True on the embed endpoint. We pre-truncate
+        # in Python using cl100k as a conservative proxy: 512 cl100k tokens at
+        # a worst-case 4:1 nomic/cl100k ratio (emoji-heavy content) = 2048 nomic
+        # tokens, which sits exactly at the model's hard limit.
+        _MAX_EMBED_TOKENS = 512
 
         class _OllamaEmbedderAdapter:
             def embed(self_inner, text: str) -> list[float]:
+                toks = _enc.encode(text)
+                if len(toks) > _MAX_EMBED_TOKENS:
+                    text = _enc.decode(toks[:_MAX_EMBED_TOKENS])
                 result = _client.embed(
                     model=_model,
                     input=text,
@@ -257,10 +265,6 @@ class ARGPipeline:
                 return list(result.embeddings[0])
 
             def embed_batch(self_inner, texts: list[str]) -> list[list[float]]:
-                # Embed one text at a time. Ollama's /api/embed checks the
-                # *total* token count of all batch inputs against num_ctx, so
-                # a 200-chunk document sent as one request overflows even a
-                # large context window.
                 return [self_inner.embed(t) for t in texts]
 
         return _OllamaEmbedderAdapter()
