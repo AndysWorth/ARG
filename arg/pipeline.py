@@ -243,6 +243,9 @@ class ARGPipeline:
         oe = OllamaEmbedding(
             model_name=self.config.embed_model,
             base_url=self.config.ollama_base_url,
+            # nomic-embed-text supports 8192 tokens; Ollama's default num_ctx
+            # is only 2048, which can be exceeded by enriched chunks.
+            ollama_additional_kwargs={"num_ctx": 8192},
         )
 
         class _OllamaEmbedderAdapter:
@@ -480,6 +483,8 @@ class ARGPipeline:
 
     def _on_file_change(self, path: Path, event_kind: str) -> None:
         """Watcher hands us debounced filesystem events."""
+        if self._closed:
+            return
         try:
             if event_kind in (EVENT_CREATED, EVENT_MODIFIED):
                 self._add_or_update_via_path(path)
