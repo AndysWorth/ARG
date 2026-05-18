@@ -256,6 +256,8 @@ class ARGPipeline:
         class _OllamaEmbedderAdapter:
             def embed(self_inner, text: str) -> list[float]:
                 toks = _enc.encode(text)
+                if not toks:
+                    raise ValueError(f"Cannot embed empty text for model {_model!r}")
                 limit = min(len(toks), _START_TOKENS)
                 while True:
                     snippet = _enc.decode(toks[:limit]) if limit < len(toks) else text
@@ -266,6 +268,10 @@ class ARGPipeline:
                             truncate=True,
                             options={"num_ctx": 8192},
                         )
+                        if not result.embeddings:
+                            raise ValueError(
+                                f"Ollama returned empty embeddings for {snippet!r:.80}"
+                            )
                         return list(result.embeddings[0])
                     except _OllamaError as exc:
                         if exc.status_code != 400 or limit <= 8:

@@ -288,7 +288,12 @@ class Indexer:
         desc = (doc.metadata.get("page_description") or "").strip()
         tokens = _ENCODER.encode(doc.content)
         body_excerpt = _ENCODER.decode(tokens[:_DOC_EMBED_TOKEN_BUDGET])
-        return (desc + " " + body_excerpt).strip() if desc else body_excerpt.strip()
+        text = (desc + " " + body_excerpt).strip() if desc else body_excerpt.strip()
+        if not text:
+            # Empty documents (no content, no description): fall back to title
+            # or filename so Ollama always receives a non-empty string.
+            text = str(doc.metadata.get("title", "") or doc.path.name)
+        return text
 
     # ------------------------------------------------------------------
     # Incremental: hashing
