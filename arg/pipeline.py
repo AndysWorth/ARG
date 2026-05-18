@@ -257,13 +257,11 @@ class ARGPipeline:
                 return list(result.embeddings[0])
 
             def embed_batch(self_inner, texts: list[str]) -> list[list[float]]:
-                result = _client.embed(
-                    model=_model,
-                    input=texts,
-                    truncate=True,
-                    options={"num_ctx": 8192},
-                )
-                return [list(v) for v in result.embeddings]
+                # Embed one text at a time. Ollama's /api/embed checks the
+                # *total* token count of all batch inputs against num_ctx, so
+                # a 200-chunk document sent as one request overflows even a
+                # large context window.
+                return [self_inner.embed(t) for t in texts]
 
         return _OllamaEmbedderAdapter()
 
