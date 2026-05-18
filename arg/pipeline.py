@@ -238,31 +238,39 @@ class ARGPipeline:
         """Construct an Ollama embedder pointed at ``config.ollama_base_url``."""
         import tiktoken as _tiktoken
         from ollama import Client as _OllamaClient
+        from ollama import ResponseError as _OllamaError
 
         _client = _OllamaClient(host=self.config.ollama_base_url)
         _model = self.config.embed_model
         _enc = _tiktoken.get_encoding("cl100k_base")
 
-        # nomic-embed-text's GGUF build enforces a 2048-token architecture
-        # limit regardless of the num_ctx Modelfile setting, and Ollama 0.21
-        # does not honour truncate=True on the embed endpoint. We pre-truncate
-        # in Python using cl100k as a conservative proxy: 512 cl100k tokens at
-        # a worst-case 4:1 nomic/cl100k ratio (emoji-heavy content) = 2048 nomic
-        # tokens, which sits exactly at the model's hard limit.
-        _MAX_EMBED_TOKENS = 512
+        # cl100k is far more compact than nomic-embed-text's byte-level BPE for
+        # multi-codepoint emoji (family/flag/skin-tone sequences): cl100k encodes
+        # the whole grapheme as 1 token; nomic may need 10-25 byte tokens. No
+        # static limit is safe across all content, so we start at 256 cl100k
+        # tokens and halve on every 400 "context exceeded" response until the
+        # call succeeds. For normal text this adds zero round-trips; for
+        # pathological content it converges in at most 5 retries.
+        _START_TOKENS = 256
 
         class _OllamaEmbedderAdapter:
             def embed(self_inner, text: str) -> list[float]:
                 toks = _enc.encode(text)
-                if len(toks) > _MAX_EMBED_TOKENS:
-                    text = _enc.decode(toks[:_MAX_EMBED_TOKENS])
-                result = _client.embed(
-                    model=_model,
-                    input=text,
-                    truncate=True,
-                    options={"num_ctx": 8192},
-                )
-                return list(result.embeddings[0])
+                limit = min(len(toks), _START_TOKENS)
+                while True:
+                    snippet = _enc.decode(toks[:limit]) if limit < len(toks) else text
+                    try:
+                        result = _client.embed(
+                            model=_model,
+                            input=snippet,
+                            truncate=True,
+                            options={"num_ctx": 8192},
+                        )
+                        return list(result.embeddings[0])
+                    except _OllamaError as exc:
+                        if exc.status_code != 400 or limit <= 8:
+                            raise
+                        limit //= 2
 
             def embed_batch(self_inner, texts: list[str]) -> list[list[float]]:
                 return [self_inner.embed(t) for t in texts]
