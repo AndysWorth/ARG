@@ -236,24 +236,34 @@ class ARGPipeline:
 
     def _default_embedder(self) -> Embedder:
         """Construct an Ollama embedder pointed at ``config.ollama_base_url``."""
-        from llama_index.embeddings.ollama import OllamaEmbedding
+        from ollama import Client as _OllamaClient
 
-        # LlamaIndex's OllamaEmbedding exposes get_text_embedding and
-        # get_text_embedding_batch. Wrap them to match the Embedder protocol.
-        oe = OllamaEmbedding(
-            model_name=self.config.embed_model,
-            base_url=self.config.ollama_base_url,
-            # nomic-embed-text supports 8192 tokens; Ollama's default num_ctx
-            # is only 2048, which can be exceeded by enriched chunks.
-            ollama_additional_kwargs={"num_ctx": 8192},
-        )
+        # Use the Ollama client directly rather than LlamaIndex's wrapper so we
+        # can pass truncate=True — LlamaIndex's OllamaEmbedding never sets it,
+        # meaning any text that exceeds the model's context raises a 400 instead
+        # of being silently clipped. num_ctx=8192 uses nomic-embed-text's full
+        # context; truncate=True is the safety net if it's still exceeded.
+        _client = _OllamaClient(host=self.config.ollama_base_url)
+        _model = self.config.embed_model
 
         class _OllamaEmbedderAdapter:
             def embed(self_inner, text: str) -> list[float]:
-                return list(oe.get_text_embedding(text))
+                result = _client.embed(
+                    model=_model,
+                    input=text,
+                    truncate=True,
+                    options={"num_ctx": 8192},
+                )
+                return list(result.embeddings[0])
 
             def embed_batch(self_inner, texts: list[str]) -> list[list[float]]:
-                return [list(v) for v in oe.get_text_embedding_batch(texts)]
+                result = _client.embed(
+                    model=_model,
+                    input=texts,
+                    truncate=True,
+                    options={"num_ctx": 8192},
+                )
+                return [list(v) for v in result.embeddings]
 
         return _OllamaEmbedderAdapter()
 
