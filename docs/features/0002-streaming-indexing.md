@@ -1,6 +1,6 @@
 # Feature 0002: Stream the crawl → indexer pipeline
 
-**Status:** draft
+**Status:** complete
 **Created:** 2026-05-15
 
 ---

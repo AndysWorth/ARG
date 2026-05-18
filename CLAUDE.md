@@ -504,6 +504,7 @@ is a quick reference only; the build Claude should not need to consult it.
 | Query processing | Rewrite → decompose → (optional HyDE); raw query used for generation |
 | DCI integration | Fully integrated into Sections 6–10; not a post-RAG layer |
 | Plain-text indexing | Feature 0001: `.txt` / `.md` / `.markdown` accepted via `extract_text`; UTF-8 → latin-1 fallback; no markdown heading detection (deferred to a future feature). See `docs/features/0001-plain-text-indexing.md`. |
+| Streaming indexer   | Feature 0002: crawler output streams directly into the indexer; per-file durability + lower memory footprint. See `docs/features/0002-streaming-indexing.md`. |
 
 ## 14. Build Order Checklist
 

@@ -48,7 +48,6 @@ import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import chromadb
@@ -134,53 +133,61 @@ class Indexer:
     def index(self, documents: Iterable[Document]) -> IndexStats:
         """Run a full indexing pass.
 
-        Two passes: first writes nodes / chunks / vectors; second adds
-        LINKS_TO edges (so edge targets are guaranteed to exist as nodes).
-        The BM25 index is rebuilt from the resulting ``chunks`` collection.
+        Streams the input one document at a time: each file is embedded,
+        written to all three stores, and its hash persisted before the
+        iterator advances. A Ctrl-C at any point leaves every file
+        processed so far durably in the index.
+
+        Link edges are recorded in a second pass after the iterator is
+        exhausted, using accumulated (src, target) tuples — no need to
+        retain Document objects in memory.
+
+        The BM25 index is rebuilt once at the end of a complete run.
         """
         import time as _time
 
-        docs = list(documents)
-        total = len(docs)
         stats = IndexStats()
-        for i, doc in enumerate(docs, start=1):
+        indexed_doc_ids: set[str] = set()
+        link_records: list[tuple[str, str]] = []
+
+        for i, doc in enumerate(documents, start=1):
+            src = str(doc.path.resolve())
+            # Accumulate link pairs now while the Document is in scope.
+            for target in doc.metadata.get("links_to", []) or []:
+                link_records.append((src, target))
+            indexed_doc_ids.add(src)
+
             if self._is_unchanged(doc):
                 stats.documents_skipped += 1
-                logger.info("[%d/%d] skip (unchanged): %s", i, total, doc.path)
+                logger.info("[#%d] skip (unchanged): %s", i, doc.path)
                 continue
+
             t0 = _time.perf_counter()
             n_chunks = self._index_one(doc)
             elapsed_ms = int((_time.perf_counter() - t0) * 1000)
             stats.documents_indexed += 1
             stats.chunks_written += n_chunks
             logger.info(
-                "[%d/%d] indexed %s (%d chunks, %d ms)",
+                "[#%d] indexed %s (%d chunks, %d ms)",
                 i,
-                total,
                 doc.path,
                 n_chunks,
                 elapsed_ms,
             )
-            # Incrementally persist hashes so a Ctrl-C / kill mid-run lets the
-            # next ``index()`` skip everything already processed. Cheap on a
-            # per-doc basis (tens of KB of JSON); enormous saving if a run
-            # of 1000 docs gets interrupted at doc 700.
+            # Persist hash immediately so the next run can skip this doc
+            # even if the process is killed before the iterator finishes.
             self._save_hashes()
 
-        # Pass 2: links. We only record edges whose target was indexed —
-        # external URL strings were already filtered by the crawler, but
-        # PDFs can carry URIs that resolve to nothing in-corpus.
-        known: set[str] = {str(Path(d.path).resolve()) for d in docs}
-        # Also include docs already present in the graph from prior runs.
+        # Link pass: union the current run's doc ids with any already in
+        # the graph from prior runs, then record edges whose target is known.
+        known: set[str] = set(indexed_doc_ids)
         for entry in self.kg.list_all_documents():
             known.add(entry["doc_id"])
 
-        for doc in docs:
-            src = str(doc.path.resolve())
-            for target in doc.metadata.get("links_to", []) or []:
-                if target in known and target != src:
-                    self.kg.add_link(src, target, "")
-                    stats.links_recorded += 1
+        for src, target in link_records:
+            if target in known and target != src:
+                self.kg.add_link(src, target, "")
+                stats.links_recorded += 1
 
         self._write_bm25_index()
         self._save_hashes()

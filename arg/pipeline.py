@@ -284,25 +284,27 @@ class ARGPipeline:
     # ------------------------------------------------------------------
 
     def index(self) -> dict[str, Any]:
-        """Crawl ``docs_root`` and (re-)index every document. Cluster cache
-        is invalidated so the next clustering call recomputes."""
+        """Crawl ``docs_root`` and (re-)index every document.
+
+        The crawl generator is passed directly to the indexer so each file
+        is embedded and persisted before the crawler advances to the next
+        one. Cluster cache is invalidated before the run starts — any new
+        chunk makes the existing cache stale regardless of how the run ends.
+        """
         with self._lock:
-            logger.info("pipeline.index: starting crawl of %s", self.config.docs_root)
-            documents = list(crawl(self.config.docs_root, self.config))
+            logger.info("pipeline.index: starting crawl + index of %s", self.config.docs_root)
+            # Invalidate before the loop: the cache is stale the moment any
+            # new chunk lands, so don't wait until the run completes.
+            self.explorer.invalidate_cluster_cache()
+            stats = self.indexer.index(crawl(self.config.docs_root, self.config))
             logger.info(
-                "pipeline.index: crawl yielded %d documents; handing off to indexer",
-                len(documents),
-            )
-            stats = self.indexer.index(documents)
-            logger.info(
-                "pipeline.index: indexer done (indexed=%d, skipped=%d, chunks=%d); "
-                "reloading retriever + invalidating cluster cache",
+                "pipeline.index: crawl + index complete "
+                "(indexed=%d, skipped=%d, chunks=%d); reloading retriever",
                 stats.documents_indexed,
                 stats.documents_skipped,
                 stats.chunks_written,
             )
             self.retriever.reload()
-            self.explorer.invalidate_cluster_cache()
             self._write_schema_hash()
             return {
                 "documents_indexed": stats.documents_indexed,

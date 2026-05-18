@@ -247,6 +247,35 @@ def test_hashes_persisted_incrementally_after_each_doc(indexer, config):
     assert save_counts[-1] == len(docs)
 
 
+def test_index_processes_documents_streamed(indexer, config):
+    """Streaming contract: each doc's hash is on disk before the next doc is yielded.
+
+    Passing a generator (not a list) confirms the indexer does not
+    materialise the input via list() before processing.
+    """
+    import json
+
+    docs = [
+        _simple_doc(config.docs_root, "a.html"),
+        _simple_doc(config.docs_root, "b.html"),
+        _simple_doc(config.docs_root, "c.html"),
+    ]
+    hash_path = config.corpus_root("default") / "doc_hashes.json"
+
+    def streaming_docs():
+        prev_id: str | None = None
+        for doc in docs:
+            if prev_id is not None:
+                assert hash_path.is_file(), "hash file must exist after first doc"
+                hashes = json.loads(hash_path.read_text())
+                assert prev_id in hashes, f"hash for {prev_id} not saved before next doc yielded"
+            yield doc
+            prev_id = str(doc.path.resolve())
+
+    stats = indexer.index(streaming_docs())
+    assert stats.documents_indexed == len(docs)
+
+
 def test_simulated_interruption_resumes_cleanly(indexer, config, monkeypatch):
     """If the indexer dies after doc 1, a fresh indexer over the same
     arg_db skips that doc on the next run."""
