@@ -7,7 +7,7 @@ readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
     # RAG framework — exact-pinned to a verified compatible set (Section 3).
-    "llama-index-core==0.14.21",
+    "llama-index-core==0.14.22",
     "llama-index-vector-stores-chroma==0.5.5",
     "llama-index-graph-stores-kuzu==0.9.1",
     "llama-index-llms-ollama==0.10.1",
