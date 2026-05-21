@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -127,7 +127,12 @@ def _relative_dir_depth(path: Path, docs_root: Path) -> int:
     return len(rel.parts) - 1
 
 
-def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
+def crawl(
+    docs_root: Path,
+    config: ARGConfig,
+    *,
+    path_filter: Callable[[Path], bool] | None = None,
+) -> Iterator[Document]:
     """Walk ``docs_root`` and yield `Document` objects.
 
     Yields HTML documents in BFS order starting from ``index.html`` (if it
@@ -138,6 +143,13 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
     are dropped.
 
     Encrypted or unreadable PDFs are skipped silently after a warning.
+
+    ``path_filter``, when provided, is called for each candidate file path
+    before extraction. Files for which it returns ``False`` are skipped
+    entirely — they are never parsed or embedded, and are not added to
+    ``seen``, so link-graph edges to them are still recorded. Pass a
+    filter built from ``--subset`` / ``--include`` CLI flags for partial
+    re-index runs.
     """
     docs_root = docs_root.resolve()
     if not docs_root.is_dir():
@@ -167,6 +179,9 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
             logger.debug("crawler: skipping %s (depth exceeds max_file_depth)", path)
             continue
 
+        if path_filter is not None and not path_filter(path):
+            continue
+
         doc = _extract_for_path(path, config)
         if doc is None:
             continue
@@ -191,6 +206,8 @@ def crawl(docs_root: Path, config: ARGConfig) -> Iterator[Document]:
         if resolved in seen:
             continue
         if _relative_dir_depth(resolved, docs_root) > config.max_file_depth:
+            continue
+        if path_filter is not None and not path_filter(resolved):
             continue
         seen.add(resolved)
         doc = _extract_for_path(resolved, config)

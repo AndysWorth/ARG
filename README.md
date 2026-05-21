@@ -84,10 +84,32 @@ python scripts/index_docs.py serve --db ./arg_db
 
 ```bash
 python scripts/index_docs.py index  --docs PATH --db PATH [--corpus NAME] [--no-watch]
+                                     [--subset SUBDIR] [--include PATTERN] [--reset]
 python scripts/index_docs.py query  --db PATH [--corpus NAME] [--no-enrich]
 python scripts/index_docs.py serve  --db PATH [--corpus NAME] [--port PORT]
 python scripts/index_docs.py stats  --db PATH [--corpus NAME]
 ```
+
+### Partial re-index (fast testing)
+
+Index only a subdirectory or file type without waiting for the full corpus:
+
+```bash
+# Re-index just one folder (wipe first)
+python scripts/index_docs.py index --docs ~/index --db ./index_db \
+  --subset ~/index/Retirement --reset --no-watch
+
+# Re-index only PDFs
+python scripts/index_docs.py index --docs ~/index --db ./index_db \
+  --include "*.pdf" --reset --no-watch
+
+# --include is repeatable; multiple patterns use OR logic
+python scripts/index_docs.py index --docs ~/index --db ./index_db \
+  --subset ~/index/Retirement --include "*.html" --include "*.pdf" --no-watch
+```
+
+`--reset` deletes the corpus before indexing (no confirmation prompt when the flag is
+explicit). Without `--reset` the filtered files are merged into the existing index.
 
 ## Multiple Documentation Sets (Multi-corpus)
 
@@ -100,7 +122,11 @@ python scripts/index_docs.py serve --db ./arg_db   # ?corpus= param selects corp
 ## Resetting a Corpus (after failed index or config change)
 
 ```bash
+# Interactive reset (asks you to type the corpus name to confirm)
 python scripts/reset_corpus.py --db ./arg_db --corpus default
+
+# Non-interactive reset (skip prompt — same as passing --reset to index)
+python scripts/reset_corpus.py --db ./arg_db --corpus default --confirm
 ```
 
 ## Evaluating Retrieval Quality

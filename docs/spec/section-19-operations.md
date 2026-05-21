@@ -105,6 +105,10 @@ To recover: run `reset_corpus.py` to delete the partial state, then re-index.
 Or use `pipeline.remove_document(doc_id)` followed by `pipeline.add_document(path)`
 to force a clean re-extraction of that specific file.
 
+The `--reset` flag on `scripts/index_docs.py index` combines both steps: it wipes the
+corpus directory then immediately begins a fresh crawl, without the interactive
+confirmation that `reset_corpus.py` requires.
+
 The `pdf_batch_size` config (default 10 pages) controls how often the indexer
 checkpoints page progress to disk. A lower value (e.g. 5) reduces the re-work
 needed if indexing is interrupted, at a small performance cost.

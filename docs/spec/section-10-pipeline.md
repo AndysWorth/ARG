@@ -148,10 +148,16 @@ watching status indicator.
 ### CLI (`scripts/index_docs.py`):
 ```bash
 python scripts/index_docs.py index  --docs /path --db ./arg_db --corpus default [--no-watch]
+                                     [--subset SUBDIR] [--include PATTERN] [--reset]
 python scripts/index_docs.py query  --db ./arg_db --corpus default [--no-enrich]
 python scripts/index_docs.py serve  --db ./arg_db --corpus default --port 8000
 python scripts/index_docs.py stats  --db ./arg_db --corpus default
 ```
+
+`--subset PATH` restricts the crawl to files at or under the given directory.
+`--include PATTERN` filters by fnmatch pattern (repeatable; OR logic between patterns).
+`--reset` deletes the corpus before indexing; no confirmation prompt is shown because the
+explicit flag is sufficient.
 
 ### Tests:
 - `test_explorer.py`: all CorpusExplorer methods; small-corpus clustering fallback;

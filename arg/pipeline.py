@@ -45,7 +45,7 @@ import json
 import logging
 import signal
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from urllib import error as urllib_error
@@ -309,20 +309,31 @@ class ARGPipeline:
     # Indexing
     # ------------------------------------------------------------------
 
-    def index(self) -> dict[str, Any]:
+    def index(
+        self,
+        *,
+        path_filter: Callable[[Path], bool] | None = None,
+    ) -> dict[str, Any]:
         """Crawl ``docs_root`` and (re-)index every document.
 
         The crawl generator is passed directly to the indexer so each file
         is embedded and persisted before the crawler advances to the next
         one. Cluster cache is invalidated before the run starts — any new
         chunk makes the existing cache stale regardless of how the run ends.
+
+        ``path_filter``, when provided, is called for each candidate path;
+        only files for which it returns True are indexed. Use this to limit
+        a run to a subdirectory or file pattern without touching the rest of
+        the corpus.
         """
         with self._lock:
             logger.info("pipeline.index: starting crawl + index of %s", self.config.docs_root)
             # Invalidate before the loop: the cache is stale the moment any
             # new chunk lands, so don't wait until the run completes.
             self.explorer.invalidate_cluster_cache()
-            stats = self.indexer.index(crawl(self.config.docs_root, self.config))
+            stats = self.indexer.index(
+                crawl(self.config.docs_root, self.config, path_filter=path_filter)
+            )
             logger.info(
                 "pipeline.index: crawl + index complete "
                 "(indexed=%d, skipped=%d, chunks=%d); reloading retriever",

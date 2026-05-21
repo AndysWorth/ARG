@@ -11,8 +11,10 @@ Subcommands per Section 10 spec:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from arg.config import ARGConfig
@@ -43,7 +45,52 @@ def _build_config_for_cli(
     return cfg
 
 
+def _build_path_filter(
+    subset: str | None,
+    include: list[str] | None,
+) -> Callable[[Path], bool] | None:
+    """Build a path predicate from --subset and --include flags.
+
+    ``subset`` restricts to files at or under a given directory.
+    ``include`` is a list of fnmatch patterns matched against the filename;
+    multiple patterns use OR logic (any match passes).
+    Both constraints are combined with AND when both are given.
+    Returns None when no filtering is requested.
+    """
+    checks: list[Callable[[Path], bool]] = []
+
+    if subset:
+        subset_path = Path(subset).expanduser().resolve()
+
+        def _subset_check(p: Path, _s: Path = subset_path) -> bool:
+            return _s in p.parents or p == _s
+
+        checks.append(_subset_check)
+
+    if include:
+        patterns = list(include)
+
+        def _include_check(p: Path, _pats: list[str] = patterns) -> bool:
+            return any(
+                fnmatch.fnmatch(p.name, pat) or fnmatch.fnmatch(str(p), pat) for pat in _pats
+            )
+
+        checks.append(_include_check)
+
+    if not checks:
+        return None
+
+    captured = list(checks)
+
+    def _combined(p: Path, _checks: list[Callable[[Path], bool]] = captured) -> bool:
+        return all(check(p) for check in _checks)
+
+    return _combined
+
+
 def cmd_index(args: argparse.Namespace) -> int:
+    import shutil
+
     from arg.pipeline import ARGPipeline
 
     cfg = _build_config_for_cli(args.docs, args.db, no_watch=args.no_watch, debug=args.debug)
@@ -51,8 +98,26 @@ def cmd_index(args: argparse.Namespace) -> int:
     enable_debug_tracing(cfg, corpus_name=args.corpus)
     print(f"[arg] logging → {log_path}")
 
+    if args.reset:
+        db_path = Path(args.db).expanduser().resolve()
+        corpus_dir = db_path / args.corpus
+        if corpus_dir.is_dir():
+            shutil.rmtree(corpus_dir)
+            print(f"[arg] corpus '{args.corpus}' wiped: {corpus_dir}")
+        else:
+            print(f"[arg] corpus '{args.corpus}' did not exist; nothing to wipe")
+
+    path_filter = _build_path_filter(
+        getattr(args, "subset", None),
+        getattr(args, "include", None),
+    )
+    if path_filter is not None:
+        subset_str = getattr(args, "subset", None) or ""
+        include_str = ", ".join(getattr(args, "include", None) or [])
+        print(f"[arg] partial index — subset={subset_str!r}  include={include_str!r}")
+
     with ARGPipeline(config=cfg, corpus_name=args.corpus) as pipeline:
-        stats = pipeline.index()
+        stats = pipeline.index(path_filter=path_filter)
     print(json.dumps(stats, indent=2))
     return 0
 
@@ -122,6 +187,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_index.add_argument("--db", required=True, help="ARG database directory")
     p_index.add_argument("--corpus", default="default")
     p_index.add_argument("--no-watch", action="store_true", help="disable live watcher")
+    p_index.add_argument(
+        "--subset",
+        default=None,
+        metavar="PATH",
+        help="only index files at or under this directory (absolute or relative to docs root)",
+    )
+    p_index.add_argument(
+        "--include",
+        action="append",
+        metavar="PATTERN",
+        help="only index files whose name matches this fnmatch pattern (repeatable; OR logic)",
+    )
+    p_index.add_argument(
+        "--reset",
+        action="store_true",
+        help="delete the existing corpus index before indexing",
+    )
     p_index.set_defaults(func=cmd_index)
 
     p_query = sub.add_parser("query", help="one-shot RAG query")
