@@ -413,7 +413,7 @@ def test_find_document_returns_ranked_doc_ids(config, kg):
     retriever = _build_retriever(config, kg)
     ranked = retriever._find_document("QUERY_A authentication", top_k=3)
     assert ranked
-    # Top hit must be alpha (its description carries QUERY_A).
+    # Top hit must be alpha (its chunks contain QUERY_A and "authentication").
     alpha_id = str((config.docs_root / "alpha.html").resolve())
     assert ranked[0][0] == alpha_id
     # Scores monotonically non-increasing.

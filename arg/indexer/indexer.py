@@ -6,7 +6,8 @@ Two ChromaDB collections live side-by-side in ``config.chroma_path(corpus)``:
   ``documents``
       One row per source file. Embedding text =
       ``page_description + first 512 tokens of body``. Used for doc-level
-      similarity (corpus_search, DCI enrichment Stage 0).
+      similarity (corpus_search). Stage 0 enrichment uses BM25 chunk
+      aggregation instead.
 
   ``chunks``
       One row per `ChunkedSection`. Embedding text is the contextually

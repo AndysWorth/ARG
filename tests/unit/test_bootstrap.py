@@ -107,7 +107,7 @@ def test_bootstrap_script_bash_syntax():
 def test_bootstrap_script_pulls_only_pinned_models():
     """Bootstrap must reference the exact pinned model tags from CLAUDE.md."""
     script_text = (PROJECT_ROOT / "scripts" / "bootstrap.sh").read_text()
-    assert "llama3.3:70b-instruct-q4_K_M" in script_text
+    assert "qwen3.6:35b-a3b-q4_K_M" in script_text
     assert "nomic-embed-text" in script_text
 
 
@@ -183,7 +183,7 @@ def test_ollama_required_models_present():
     )
     assert out.returncode == 0, out.stderr
     listed = out.stdout
-    missing = [m for m in ("llama3.3:70b-instruct-q4_K_M", "nomic-embed-text") if m not in listed]
+    missing = [m for m in ("qwen3.6:35b-a3b-q4_K_M", "nomic-embed-text") if m not in listed]
     if missing:
         pytest.skip(f"required Ollama models not pulled yet: {missing}; run scripts/bootstrap.sh")
 

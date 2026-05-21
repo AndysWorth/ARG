@@ -35,7 +35,7 @@ def _build_config_for_cli(
     """
     db = Path(db_path).expanduser().resolve()
     docs = Path(docs_path).expanduser().resolve() if docs_path else db
-    cfg = ARGConfig(docs_root=docs, db_path=db)
+    cfg = ARGConfig.from_env(docs_root=docs, db_path=db)
     if no_watch:
         cfg.watch_enabled = False
     if debug:

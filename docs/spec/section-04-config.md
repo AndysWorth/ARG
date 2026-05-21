@@ -24,7 +24,7 @@ class ARGConfig:
     #   debug_traces_path  → db_path / corpus_name / "debug_traces/"
 
     # Models
-    llm_model: str           = "llama3.3:70b-instruct-q4_K_M"
+    llm_model: str           = "qwen3.6:35b-a3b-q4_K_M"
     embed_model: str         = "nomic-embed-text"
     ollama_base_url: str     = "http://localhost:11434"
 

@@ -24,8 +24,9 @@ path-convention namespace (`arg_db/{corpus_name}/`).
 
 Retrieval is a 5-stage pipeline:
 
-- **Stage 0 — DCI enrichment.** Doc-level dense search finds relevant documents;
-  their link neighbourhoods and topic clusters expand the candidate pool.
+- **Stage 0 — DCI enrichment.** BM25 chunk scores aggregated per document find
+  the most relevant files; their link neighbourhoods and topic clusters expand
+  the candidate pool.
 - **Stage 1 — Dense retrieval.** Top-k chunks via nomic-embed-text + ChromaDB.
 - **Stage 1.5 — BM25 retrieval.** Sparse exact-term recall via rank_bm25, run in
   parallel with dense.
@@ -52,7 +53,7 @@ bash scripts/bootstrap.sh
 ```
 
 Bootstrap checks for Ollama and installs it via Homebrew if missing; pulls
-`llama3.3:70b-instruct-q4_K_M` and `nomic-embed-text` only if they are not
+`qwen3.6:35b-a3b-q4_K_M` and `nomic-embed-text` only if they are not
 already in `ollama list`; installs Tesseract (for pymupdf OCR tessdata);
 downloads D3.js v7 once to `arg/static/d3.min.js`; creates a Python 3.11+
 virtual environment at `.venv/` using stdlib `python3.11 -m venv`; activates it;
@@ -144,5 +145,5 @@ All tunables live in `.env` (copy from `.env.example`). Key settings:
 ```bash
 pytest tests/unit/          # fast; no Ollama required (LLM mocked)
 pytest tests/integration/   # requires indexed corpus; LLM mocked
-pytest tests/e2e/           # requires running Ollama with llama3.3 and nomic-embed-text
+pytest tests/e2e/           # requires running Ollama with qwen3.6 and nomic-embed-text
 ```

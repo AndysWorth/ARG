@@ -290,7 +290,7 @@ class ARGPipeline:
         client = Ollama(
             model=self.config.llm_model,
             base_url=self.config.ollama_base_url,
-            request_timeout=120.0,
+            request_timeout=self.config.ollama_timeout,
         )
 
         class _OllamaLLMAdapter:

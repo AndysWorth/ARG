@@ -118,6 +118,25 @@ class BM25Index:
     # Query
     # ------------------------------------------------------------------
 
+    def score_all(self, q: str) -> list[tuple[str, float]]:
+        """Return all chunks with raw BM25 scores, sorted descending.
+
+        Unlike :meth:`query`, no ``score > 0`` filter is applied. This is
+        needed by doc-level aggregation in Stage 0, where BM25Okapi can
+        produce negative IDF values in small corpora and relative ranking
+        still carries signal.
+        """
+        if self.is_empty:
+            return []
+        tokens = _tokenize(q)
+        if not tokens:
+            return []
+        scores = self.bm25.get_scores(tokens)  # type: ignore[union-attr]
+        return sorted(
+            zip(self.chunk_ids, scores, strict=True),
+            key=lambda x: (-float(x[1]), x[0]),
+        )
+
     def query(self, q: str, top_k: int = 10) -> list[tuple[str, float]]:
         """Return ``[(chunk_id, score), ...]`` ranked by BM25 score, descending."""
         if self.is_empty or top_k <= 0:

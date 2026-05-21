@@ -13,7 +13,8 @@ query (rewritten by QueryProcessor if query_rewrite=True — see Section 9)
   │
   ├─► [Stage 0 — Context Enrichment] (when enrich=True)
   │     0.1  _find_document(query, top_k=enrich_top_docs)
-  │          → search `documents` ChromaDB collection by embedding similarity
+  │          → query BM25 chunk index; aggregate scores to doc level via max
+  │          → normalise scores to [0, 1] relative to top result
   │          → if no hits above enrich_min_score: skip Stage 0 entirely
   │
   │     0.2  Link expansion: for each top doc:
@@ -102,8 +103,8 @@ and Stage 1.5. `scope_doc_id` takes precedence over `filters`; if both are set,
 ### Notes:
 - **`scope_doc_id`** bypasses all enrichment and graph expansion; returns chunks from
   one document only. Filters still apply within scoped mode.
-- **`_find_document()`** private method: searches `documents` collection, called by
-  Stage 0.1 and `corpus_search()`.
+- **`_find_document()`** private method: queries BM25 chunk index, aggregates to
+  doc level via max score, normalises to [0, 1]. Called by Stage 0.1 and `corpus_search()`.
 - **RRF replaces weighted scoring:** The old `0.7 × vector + 0.3 × graph` formula is
   replaced by RRF across all stages (dense, sparse, graph). RRF is more robust because
   it doesn't require normalising scores across different retrieval methods.
@@ -130,7 +131,7 @@ and Stage 1.5. `scope_doc_id` takes precedence over `filters`; if both are set,
 - `enrich=True`, `enrich_min_score=1.0` (impossible): falls back to unfiltered Stage 1
 - Sparse Stage 1 result (< top_k_vector/2): triggers unfiltered re-run + merge
 - Lost-in-middle reordering: highest-scored chunk is at position 0; second-highest at position -1
-- `_find_document()` returns ranked doc_ids from `documents` collection
+- `_find_document()` returns ranked doc_ids via BM25 chunk aggregation (max score, normalised)
 - Stage 0.3 skipped gracefully when `cluster_cache.json` absent
 - BM25 index persists to disk; reloads correctly
 - BM25 index updated correctly after `add_document()` and `remove_document()`

@@ -110,7 +110,7 @@ rewritten version. Rewriting is only for retrieval precision.
 
 ### Generator behaviour:
 - Uses `RetrieverQueryEngine` with `HybridRetriever` from Section 8
-- LLM: `llama3.3:70b-instruct-q4_K_M` via `OllamaLLM`
+- LLM: `qwen3.6:35b-a3b-q4_K_M` via `OllamaLLM`
 - Returns `ARGResult`:
   ```python
   @dataclass

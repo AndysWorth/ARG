@@ -17,7 +17,7 @@ plain-text indexing):
   * RAG quality (real LLM): a small question battery returns non-empty
     answers, the unrelated question returns the refusal string, and the
     rate-limit table answer surfaces table content. These are gated by
-    the ``real_llm`` fixture so the suite skips them when llama3.3:70b
+    the ``real_llm`` fixture so the suite skips them when qwen3.6:35b
     isn't pulled.
 
 All tests in this file are marked ``e2e`` per the project's marker scheme.
@@ -53,7 +53,7 @@ def _resolved(corpus_root: Path, *parts: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Structural assertions (mocked LLM; doesn't need llama3.3)
+# Structural assertions (mocked LLM; doesn't need qwen3.6)
 # ---------------------------------------------------------------------------
 
 
@@ -218,7 +218,7 @@ def test_watcher_live_add_remove(tmp_path, corpus_a_path, ollama_embedder, mock_
 
 
 # ---------------------------------------------------------------------------
-# RAG quality (real LLM — slow; skips when llama3.3:70b isn't pulled)
+# RAG quality (real LLM — slow; skips when qwen3.6:35b isn't pulled)
 # ---------------------------------------------------------------------------
 
 

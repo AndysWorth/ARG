@@ -2,10 +2,12 @@
 
 Stages, in order:
 
-  0. **Context enrichment.** Doc-level dense search picks the top
+  0. **Context enrichment.** Doc-level BM25 search picks the top
      ``config.enrich_top_docs`` documents (gated by
-     ``config.enrich_min_score``). Each one's link neighbours (forward +
-     reverse) and topic-cluster mates expand a candidate doc-id set.
+     ``config.enrich_min_score``). Chunk-level BM25 scores are aggregated
+     to the document level using max score, then normalised to [0, 1].
+     Each qualifying document's link neighbours (forward + reverse) and
+     topic-cluster mates expand a candidate doc-id set.
   1. **Dense vector search.** Embed the query and pull ``top_k_vector``
      chunks from ChromaDB. When the enrichment set is non-empty, the search
      is filtered to it; a Stage-1 yield smaller than ``top_k_vector // 2``
@@ -180,7 +182,7 @@ class HybridRetriever:
 
     def _stage0_enrichment(self, query: str) -> set[str] | None:
         """Return a candidate doc-id set, or ``None`` to mean "use full corpus"."""
-        # 0.1 doc-level dense search.
+        # 0.1 doc-level BM25 search.
         ranked = self._find_document(query, top_k=self.config.enrich_top_docs)
         if not ranked:
             return None
@@ -211,20 +213,45 @@ class HybridRetriever:
         return candidates
 
     def _find_document(self, query: str, *, top_k: int) -> list[tuple[str, float]]:
-        """Search the ``documents`` Chroma collection. Returns ``[(doc_id, score)]``."""
-        if top_k <= 0:
+        """Find top ``top_k`` documents by BM25 score aggregated from chunk hits.
+
+        Queries the BM25 index, groups chunk scores by doc_id using max
+        (a document is as relevant as its best-matching chunk), normalises
+        to [0, 1] relative to the top result, and returns the top ``top_k``
+        documents sorted by score descending.
+
+        BM25 exact-term matching outperforms dense doc-level search for
+        queries containing specific named entities, dates, and technical
+        terms — the dominant query type in a personal document corpus.
+        """
+        if top_k <= 0 or self._bm25.is_empty:
             return []
-        qvec = self.embedder.embed(query)
-        n_in = self._docs_coll.count()
-        if n_in == 0:
+
+        # score_all() returns every chunk ranked by raw BM25 score without
+        # the score > 0 filter, which is important for small corpora where
+        # BM25Okapi IDF values can be negative.
+        raw = self._bm25.score_all(query)
+        if not raw:
             return []
-        result = self._docs_coll.query(
-            query_embeddings=[qvec],  # type: ignore[arg-type, unused-ignore]
-            n_results=min(top_k, n_in),
-        )
-        ids = result["ids"][0] if result["ids"] else []
-        dists = result["distances"][0] if result.get("distances") else [1.0] * len(ids)
-        return [(doc_id, _distance_to_score(dist)) for doc_id, dist in zip(ids, dists, strict=True)]
+
+        # Aggregate chunk scores to document level using max.
+        doc_scores: dict[str, float] = {}
+        for chunk_id, score in raw:
+            doc_id = chunk_id.split("::chunk::")[0] if "::chunk::" in chunk_id else chunk_id
+            if score > doc_scores.get(doc_id, float("-inf")):
+                doc_scores[doc_id] = score
+
+        # Min-max normalise to [0, 1] so enrich_min_score is interpretable
+        # and negative BM25 scores don't distort relative ranking.
+        min_s = min(doc_scores.values())
+        max_s = max(doc_scores.values())
+        if max_s == min_s:
+            doc_scores = dict.fromkeys(doc_scores, 1.0)
+        else:
+            doc_scores = {did: (s - min_s) / (max_s - min_s) for did, s in doc_scores.items()}
+
+        ranked = sorted(doc_scores.items(), key=lambda x: (-x[1], x[0]))
+        return ranked[:top_k]
 
     def _load_cluster_cache(self) -> dict[str, Any] | None:
         if self._cluster_cache_path is None:

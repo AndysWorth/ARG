@@ -10,7 +10,7 @@ reference cover the full RAG + DCI surface.
   * :meth:`compare_documents`      — structured side-by-side comparison.
   * :meth:`scoped_search`          — vector search inside one document.
   * :meth:`get_chunks`             — raw chunk records from KG + Chroma.
-  * :meth:`find_document`          — doc-level dense search (internal;
+  * :meth:`find_document`          — doc-level BM25 search (internal;
     used by Stage 0 enrichment and CorpusExplorer.corpus_search).
 
 The summary cache writes to ``{corpus_root}/summaries/{hash}.json`` when
@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 
 
 _ENCODER = tiktoken.get_encoding("cl100k_base")
-# Approximate budget for a single LLM call. llama3.3:70b has an 8k context,
-# but we leave significant headroom for the prompt template + response.
+# Approximate budget for a single LLM call. qwen3.6:35b has a 256k context,
+# but we keep batches small to leave headroom for the prompt template + response.
 _BATCH_TOKEN_BUDGET = 4000
 
 _SUMMARY_PROMPT = """\
@@ -252,11 +252,12 @@ class CorpusAnalyst:
     def find_document(
         self, query: str, top_k: int = 5, file_type: str | None = None
     ) -> list[dict[str, Any]]:
-        """Search the ``documents`` collection. Returns ranked ``[{doc_id, title, similarity_score}]``.
+        """BM25 document search. Returns ranked ``[{doc_id, title, similarity_score}]``.
 
-        Internal to ARG: used by the retriever's Stage 0.1 enrichment and by
-        :class:`CorpusExplorer.corpus_search` (Section 10). Not exposed on
-        the pipeline's public API.
+        Aggregates chunk-level BM25 scores to the document level (max score
+        per doc), normalised to [0, 1]. Used by the retriever's Stage 0.1
+        enrichment and by :class:`CorpusExplorer.corpus_search` (Section 10).
+        Not exposed on the pipeline's public API.
         """
         ranked = self.retriever._find_document(query, top_k=top_k)
         if not ranked:

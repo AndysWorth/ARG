@@ -21,7 +21,7 @@ Locality
 --------
 Integration tests use the **real** Ollama embedder (so on-disk ChromaDB
 shape matches production exactly) but the **mocked** LLM (so tests stay
-deterministic and don't depend on llama3.3 being warm). When Ollama is not
+deterministic and don't depend on qwen3.6 being warm). When Ollama is not
 running locally, integration tests are skipped — never failed.
 """
 
@@ -189,13 +189,13 @@ def ollama_embedder(ollama_available: bool) -> Embedder:
 
 
 # ---------------------------------------------------------------------------
-# Real Ollama LLM (skips when llama3.3:70b not pulled)
+# Real Ollama LLM (skips when qwen3.6:35b not pulled)
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session")
-def llama_model_available(ollama_available: bool) -> bool:
-    """True when llama3.3:70b-instruct-q4_K_M is in ``ollama list``."""
+def llm_model_available(ollama_available: bool) -> bool:
+    """True when qwen3.6:35b-a3b-q4_K_M is in ``ollama list``."""
     if not ollama_available:
         return False
     import shutil
@@ -204,22 +204,22 @@ def llama_model_available(ollama_available: bool) -> bool:
     if not shutil.which("ollama"):
         return False
     result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=False)
-    return "llama3.3:70b-instruct-q4_K_M" in (result.stdout or "")
+    return "qwen3.6:35b-a3b-q4_K_M" in (result.stdout or "")
 
 
 @pytest.fixture(scope="session")
-def real_llm(llama_model_available: bool) -> LLM:
+def real_llm(llm_model_available: bool) -> LLM:
     """Adapter around llama-index's Ollama LLM pointed at the local daemon.
 
-    Skips when the llama3.3 model isn't pulled — answer quality tests can't
+    Skips when the qwen3.6 model isn't pulled — answer quality tests can't
     run without it. Session-scoped because the model warm-up is the slow part.
     """
-    if not llama_model_available:
-        pytest.skip("llama3.3:70b-instruct-q4_K_M not pulled in Ollama")
+    if not llm_model_available:
+        pytest.skip("qwen3.6:35b-a3b-q4_K_M not pulled in Ollama")
     from llama_index.llms.ollama import Ollama
 
     client = Ollama(
-        model="llama3.3:70b-instruct-q4_K_M",
+        model="qwen3.6:35b-a3b-q4_K_M",
         base_url="http://localhost:11434",
         request_timeout=180.0,
     )

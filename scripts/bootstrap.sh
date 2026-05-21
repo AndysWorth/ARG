@@ -8,7 +8,7 @@
 #   - Installs project via `pip install -e .[dev]`, preferring `./vendor/` wheel cache
 #   - Installs Tesseract via Homebrew (provides tessdata for pymupdf OCR)
 #   - Installs Ollama via Homebrew if absent
-#   - Pulls llama3.3:70b-instruct-q4_K_M and nomic-embed-text ONLY if absent
+#   - Pulls qwen3.6:35b-a3b-q4_K_M and nomic-embed-text ONLY if absent
 #   - Downloads D3.js v7 once to arg/static/d3.min.js (served locally, never CDN)
 #
 # After bootstrap completes, ARG makes zero outbound network calls.
@@ -90,7 +90,7 @@ log "ollama is reachable at localhost:11434."
 #   NAME                            ID    SIZE   MODIFIED
 present_models="$(ollama list 2>/dev/null | awk 'NR>1 {print $1}')"
 
-want_llm="llama3.3:70b-instruct-q4_K_M"
+want_llm="qwen3.6:35b-a3b-q4_K_M"
 want_embed="nomic-embed-text"
 
 if printf '%s\n' "${present_models}" | grep -Fxq "${want_llm}"; then

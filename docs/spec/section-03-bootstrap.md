@@ -90,7 +90,7 @@ JS-rendered content not indexed, encrypted PDFs skipped, RTL text not supported,
 ## Running Tests
 pytest tests/unit/          # fast; no Ollama required (LLM mocked)
 pytest tests/integration/   # requires indexed corpus; LLM mocked
-pytest tests/e2e/           # requires running Ollama with llama3.3 and nomic-embed-text
+pytest tests/e2e/           # requires running Ollama with qwen3.6 and nomic-embed-text
 ```
 
 ### Pre-build verification (do this before Section 3):
@@ -107,7 +107,7 @@ the exact package name before writing `pyproject.toml`.
 
 ### Bootstrap rules — ALL processing must be local at runtime:
 1. **Ollama model check first**: run `ollama list` and skip `ollama pull` entirely if
-   `llama3.3:70b-instruct-q4_K_M` and `nomic-embed-text` are already present.
+   `qwen3.6:35b-a3b-q4_K_M` and `nomic-embed-text` are already present.
    Bootstrap is a one-time setup tool; it must never pull models during normal operation.
 2. **Offline pip support**: bootstrap must support
    `pip install --no-index --find-links ./vendor/` if a `./vendor/` wheel cache exists,

@@ -121,7 +121,7 @@ class CorpusExplorer:
     def corpus_search(
         self, query: str, file_type: str | None = None, top_k: int = 10
     ) -> list[dict[str, Any]]:
-        """Doc-level dense search; optional file_type filter."""
+        """Doc-level BM25 search; optional file_type filter."""
         return self.analyst.find_document(query, top_k=top_k, file_type=file_type)
 
     # ------------------------------------------------------------------

@@ -555,7 +555,7 @@ You monitor progress and say `"Continue"` after each section completes.
 
 - [ ] **Section 11** — Integration Tests + conftest.py
   - **Tell Claude Code:** `"Produce conftest.py first and confirm it, then produce each integration test file."`
-  - **Requires:** Ollama running with llama3.3 and nomic-embed-text
+  - **Requires:** Ollama running with qwen3.6 and nomic-embed-text
   - **Done when:** `pytest tests/integration/ -v` passes
 
 - [ ] **Section 12** — Fixture Corpora + E2E Tests

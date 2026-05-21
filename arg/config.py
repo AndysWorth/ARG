@@ -66,9 +66,10 @@ class ARGConfig:
     db_path: Path
 
     # --- Models -----------------------------------------------------------
-    llm_model: str = "llama3.3:70b-instruct-q4_K_M"
+    llm_model: str = "qwen3.6:35b-a3b-q4_K_M"
     embed_model: str = "nomic-embed-text"
     ollama_base_url: str = "http://localhost:11434"
+    ollama_timeout: float = 300.0
 
     # --- Chunking ---------------------------------------------------------
     chunk_size: int = 1024
@@ -249,6 +250,7 @@ class ARGConfig:
             "OLLAMA_BASE_URL": ("ollama_base_url", str),
             "OLLAMA_LLM_MODEL": ("llm_model", str),
             "OLLAMA_EMBED_MODEL": ("embed_model", str),
+            "OLLAMA_TIMEOUT": ("ollama_timeout", float),
             # Chunking
             "CHUNK_SIZE": ("chunk_size", int),
             "CHUNK_OVERLAP": ("chunk_overlap", int),

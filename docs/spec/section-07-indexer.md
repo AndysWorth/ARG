@@ -41,7 +41,8 @@ Document (from crawler)
   │     (page_description prepended so doc vector reflects page summary)  │
   │     → nomic-embed-text → ChromaDB collection: "documents"             │
   │     Metadata: {doc_id, title, file_type, page_description}            │
-  │     Used by: corpus_search(), find_document(), enrichment Stage 0     │
+  │     Used by: corpus_search(), find_document()                         │
+  │     (Stage 0 enrichment uses BM25 chunk aggregation instead)          │
   │                                                                        │
   └─► [Chunk-level processing] ◄──────────────────────────────────────────┘
         chunker.py (H1–H3 boundary splits + sliding window)
