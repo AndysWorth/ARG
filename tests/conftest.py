@@ -146,6 +146,9 @@ class _MockLLM:
                 return response
         return self.default
 
+    def complete_structured(self, prompt: str, schema: dict) -> str:
+        return self.complete(prompt)
+
     def stream_complete(self, prompt: str) -> Iterator[str]:
         yield from self.complete(prompt)
 
@@ -227,6 +230,9 @@ def real_llm(llm_model_available: bool) -> LLM:
     class _Adapter:
         def complete(self, prompt: str) -> str:
             return str(client.complete(prompt))
+
+        def complete_structured(self, prompt: str, schema: dict) -> str:
+            return str(client.complete(prompt, format=schema))
 
         def stream_complete(self, prompt: str) -> Iterator[str]:
             for chunk in client.stream_complete(prompt):

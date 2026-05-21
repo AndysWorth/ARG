@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/andy/dl/2026-05-11_ARG/ARG && .venv/bin/ruff check --fix arg/ scripts/ && .venv/bin/ruff format arg/ scripts/"
+          }
+        ]
+      }
+    ]
+  }
+}

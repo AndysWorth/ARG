@@ -295,4 +295,5 @@ secrets/
 .secrets
 
 # --- Claude Code ---
-.claude/
+# settings.local.json is user-specific; settings.json and rules/ are project-shared
+.claude/settings.local.json

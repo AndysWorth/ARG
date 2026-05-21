@@ -297,6 +297,9 @@ class ARGPipeline:
             def complete(self_inner, prompt: str) -> str:
                 return str(client.complete(prompt))
 
+            def complete_structured(self_inner, prompt: str, schema: dict) -> str:
+                return str(client.complete(prompt, format=schema))
+
             def stream_complete(self_inner, prompt: str) -> Iterator[str]:
                 for chunk in client.stream_complete(prompt):
                     text = getattr(chunk, "delta", None) or getattr(chunk, "text", "")

@@ -63,6 +63,9 @@ class _ScriptedLLM:
                 return response
         return self.default
 
+    def complete_structured(self, prompt: str, schema: dict) -> str:
+        return self.complete(prompt)
+
     def stream_complete(self, prompt: str) -> Iterator[str]:
         yield from self.complete(prompt)
 
@@ -296,7 +299,7 @@ def test_query_sub_queries_populated_for_compound(config):
         responses={
             "Rewrite the following": "auth and migrations",
             "Does the following question contain": (
-                "How does authentication work?\nWhat are the database migrations?"
+                '{"sub_questions": ["How does authentication work?", "What are the database migrations?"]}'
             ),
         }
     )

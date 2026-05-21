@@ -53,6 +53,9 @@ class _ScriptedLLM:
         self.calls.append(prompt)
         return self.default
 
+    def complete_structured(self, prompt: str, schema: dict) -> str:
+        return self.complete(prompt)
+
     def stream_complete(self, prompt: str) -> Iterator[str]:
         yield from self.complete(prompt)
 

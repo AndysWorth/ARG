@@ -71,6 +71,9 @@ class _ScriptedLLM:
                 return response
         return self.default
 
+    def complete_structured(self, prompt: str, schema: dict) -> str:
+        return self.complete(prompt)
+
     def stream_complete(self, prompt: str) -> Iterator[str]:
         # Yield character-by-character so tests can prove incremental delivery.
         full = self.complete(prompt)
@@ -227,7 +230,7 @@ def test_decomposition_produces_sub_queries_for_compound_question(config, kg):
         responses={
             "Rewrite the following": "How does authentication work and what are the rate limits?",
             "Does the following question contain": (
-                "How does authentication work?\nWhat are the rate limits?"
+                '{"sub_questions": ["How does authentication work?", "What are the rate limits?"]}'
             ),
         }
     )
@@ -243,7 +246,7 @@ def test_decomposition_returns_none_for_single_question(config, kg):
     llm = _ScriptedLLM(
         responses={
             "Rewrite the following": "What is the OAuth flow?",
-            "Does the following question contain": "What is the OAuth flow?",
+            "Does the following question contain": '{"sub_questions": ["What is the OAuth flow?"]}',
         }
     )
     gen, _, _ = _build_generator(config, kg, llm=llm)
@@ -263,7 +266,9 @@ def test_sub_query_chunks_unioned_no_duplicate_chunk_ids(config, kg):
     llm = _ScriptedLLM(
         responses={
             "Rewrite the following": "QUERY_A authentication and QUERY_A oauth",
-            "Does the following question contain": ("QUERY_A authentication\nQUERY_A oauth"),
+            "Does the following question contain": (
+                '{"sub_questions": ["QUERY_A authentication", "QUERY_A oauth"]}'
+            ),
         }
     )
     gen, _, _ = _build_generator(config, kg, llm=llm)
@@ -422,16 +427,14 @@ def test_query_processor_rewrite_called_with_raw_query(config):
     assert any("how do I do this?" in p for p in llm.calls)
 
 
-def test_query_processor_decompose_pads_against_short_lines(config):
-    """If the LLM hallucinates noise lines like "Yes:" or "- ", they're filtered."""
+def test_query_processor_decompose_falls_back_on_bad_json(config):
+    """If complete_structured somehow returns non-JSON, decompose returns [query]."""
     llm = _ScriptedLLM(
         responses={
             "Rewrite the following": "tell me X and Y",
-            "Does the following question contain": (
-                "Yes:\n- Tell me X separately\n- Tell me Y separately\n"
-            ),
+            "Does the following question contain": "not valid json",
         }
     )
     qp = QueryProcessor(config=config, llm=llm)
     out = qp.process("conversational input")
-    assert out.sub_queries == ["Tell me X separately", "Tell me Y separately"]
+    assert out.sub_queries is None

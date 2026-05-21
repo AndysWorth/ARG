@@ -16,7 +16,7 @@ types here.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class LLM(Protocol):
@@ -28,4 +28,13 @@ class LLM(Protocol):
 
     def stream_complete(self, prompt: str) -> Iterator[str]:
         """Yield completion text incrementally as it arrives from the model."""
+        ...
+
+    def complete_structured(self, prompt: str, schema: dict[str, Any]) -> str:
+        """Like ``complete`` but passes a JSON Schema to constrain the output.
+
+        Ollama enforces the schema via grammar-based sampling so the response
+        is guaranteed to be valid JSON matching ``schema``. Callers should
+        still wrap ``json.loads`` in a try/except for robustness.
+        """
         ...

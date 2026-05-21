@@ -20,9 +20,11 @@ paragraphs are retrieval-only artefacts.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from arg.config import ARGConfig
 from arg.llm import LLM
@@ -53,10 +55,28 @@ User question: {query}"""
 
 _DECOMPOSE_PROMPT = """\
 Does the following question contain multiple independent sub-questions that should
-be researched separately? If yes, list each sub-question on its own line.
-If no, output the original question unchanged.
+be researched separately?
+
+Return a JSON object with a single key "sub_questions" whose value is an array of
+strings. If the question should be split, list each independent sub-question as a
+separate array element. If not, return a single-element array with the original
+question unchanged.
 
 Question: {query}"""
+
+# JSON schema passed to Ollama's format parameter — grammar-based sampling
+# guarantees the output matches this structure.
+_DECOMPOSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "sub_questions": {
+            "type": "array",
+            "items": {"type": "string"},
+        }
+    },
+    "required": ["sub_questions"],
+    "additionalProperties": False,
+}
 
 _HYDE_PROMPT = """\
 Write a short paragraph (3-5 sentences) that would be a plausible answer to the
@@ -143,19 +163,15 @@ class QueryProcessor:
         """Split a compound query into sub-queries. Returns ``[query]`` if no split."""
         if not self.config.query_decompose:
             return [query]
-        raw = self.llm.complete(_DECOMPOSE_PROMPT.format(query=query))
-        # The LLM is asked to either repeat the question or emit one
-        # sub-question per line. Strip empty lines, trim whitespace, and
-        # drop any line that's essentially the original "Question: ..." echo.
-        candidates = [line.strip().lstrip("-*•1234567890. \t") for line in raw.splitlines()]
-        cleaned = [c for c in candidates if c and len(c) > 5]
-        if not cleaned:
+        raw = self.llm.complete_structured(
+            _DECOMPOSE_PROMPT.format(query=query),
+            schema=_DECOMPOSE_SCHEMA,
+        )
+        try:
+            parts = [s.strip() for s in json.loads(raw).get("sub_questions", []) if s.strip()]
+        except (json.JSONDecodeError, AttributeError):
             return [query]
-        # A single output line means "no decomposition" — return it as-is
-        # only if it differs meaningfully from the input.
-        if len(cleaned) == 1:
-            return [query]
-        return cleaned
+        return parts if len(parts) > 1 else [query]
 
     def _hyde_paragraph(self, query: str) -> str:
         """Generate a hypothetical answer paragraph for embedding."""
