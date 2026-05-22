@@ -17,11 +17,11 @@ deep inside LlamaIndex.
 
 ### 4.2 — Memory pressure on M1 Max (64GB)
 Expected memory footprint during normal operation:
-- Llama 3.3 70B Q4_K_M loaded in Ollama: ~38GB
+- qwen3.6:35b-a3b-q4_K_M loaded in Ollama: ~22GB
 - ChromaDB + numpy (Metal): ~1–2GB
 - Kuzu graph: ~200MB for typical doc sets
 - Python process + FastAPI: ~500MB
-- Total steady state: ~40–41GB — well within 64GB
+- Total steady state: ~24–25GB — well within 64GB
 
 **Risk scenario:** cluster cache rebuild triggered during active LLM inference.
 Both operations are memory-hungry. To prevent:

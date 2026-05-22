@@ -9,8 +9,8 @@ Runs entirely on Apple M1 Max (64GB). Zero cloud calls. Zero telemetry.
 ARG indexes a directory of HTML, PDF, and plain-text documentation, follows links recursively
 to build a knowledge graph of the corpus, and answers questions over it using
 hybrid retrieval: dense embeddings (nomic-embed-text via Ollama), sparse BM25
-keyword search, and knowledge-graph traversal. Generation uses Llama 3.3 70B
-served locally by Ollama. Everything runs on-device — there are no outbound
+keyword search, and knowledge-graph traversal. Generation uses Qwen3.6 35B
+(qwen3.6:35b-a3b-q4_K_M) served locally by Ollama. Everything runs on-device — there are no outbound
 network calls during operation.
 
 Beyond Q&A, ARG provides DCI ("Direct Corpus Interaction") features for
@@ -36,7 +36,7 @@ Retrieval is a 5-stage pipeline:
 - **Stage 4 — Lost-in-middle reordering.** Top-ranked chunks moved to the head
   and tail of the prompt; mid-ranked chunks placed in the middle.
 
-The fused, reordered context is handed to Llama 3.3 via LlamaIndex's query engine.
+The fused, reordered context is handed to Qwen3.6 35B via LlamaIndex's query engine.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ The fused, reordered context is handed to Llama 3.3 via LlamaIndex's query engin
 - macOS 13+
 - Homebrew
 - Python 3.11+
-- ~50GB free disk space (~38GB for the Llama 3.3 Q4_K_M model, rest for index data)
+- ~25GB free disk space (~22GB for the qwen3.6:35b-a3b-q4_K_M model, rest for index data)
 
 ## Bootstrap (one-time setup)
 
