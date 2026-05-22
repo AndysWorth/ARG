@@ -61,6 +61,9 @@ class _ScriptedLLM:
     def stream_complete(self, prompt: str) -> Iterator[str]:
         yield self.complete(prompt)
 
+    def complete_structured(self, prompt: str, schema: dict) -> str:
+        return self.complete(prompt)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
