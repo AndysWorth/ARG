@@ -88,6 +88,7 @@ def main() -> int:
         print(f"  {DIM}Stage 0 returns None → full corpus searched.{RESET}")
         return 0
 
+    # Intentionally duplicates _find_document() so each sub-step is visible.
     # Aggregate to doc level using max chunk score
     doc_best_chunk: dict[str, tuple[float, str]] = {}  # doc_id → (score, chunk_id)
     doc_all_chunks: dict[str, list[tuple[str, float]]] = {}

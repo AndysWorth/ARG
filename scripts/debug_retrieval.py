@@ -84,6 +84,7 @@ def main() -> int:
         f"bm25={cfg.bm25_enabled}  graph_hop={cfg.graph_hop_depth}{RESET}"
     )
 
+    # Intentionally duplicates ARGRetriever.retrieve() so each stage is visible.
     # ── Stage 0: Enrichment ──────────────────────────────────────────────
     candidate_doc_ids = None
     if cfg.enrich_enabled and not args.no_enrich:
