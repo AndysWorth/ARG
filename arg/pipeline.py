@@ -172,7 +172,13 @@ class ARGPipeline:
         if not skip_signal_handlers:
             self._register_signal_handlers()
 
-        logger.info("pipeline: ready (corpus=%s, docs=%s)", corpus_name, config.docs_root)
+        logger.info(
+            "pipeline: ready (corpus=%s, docs=%s, query_rewrite=%s, query_decompose=%s)",
+            corpus_name,
+            config.docs_root,
+            config.query_rewrite,
+            config.query_decompose,
+        )
 
     # ------------------------------------------------------------------
     # Pre-flight
