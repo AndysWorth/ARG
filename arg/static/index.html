@@ -83,7 +83,7 @@
       <div id="answer" class="answer empty">Ask a question above.</div>
       <div id="sources" class="sources"></div>
 
-      <h2 style="margin-top: 24px;">Document graph</h2>
+      <h2 style="margin-top: 24px;">Topic clusters</h2>
       <div id="graph"></div>
     </section>
 
@@ -190,32 +190,119 @@
     }
 
     async function refreshGraph() {
+      if (!window.d3) return;
       try {
-        const g = await api("/corpus/graph");
-        renderGraph(g.nodes, g.edges);
+        const [docs, topics] = await Promise.all([api("/corpus"), api("/corpus/topics")]);
+        renderClusterGraph(docs, topics);
       } catch (e) { /* graph optional */ }
     }
 
-    function renderGraph(nodes, edges) {
-      if (!window.d3) return;
-      const w = document.getElementById("graph").clientWidth;
+    function renderClusterGraph(docs, topics) {
+      const el = document.getElementById("graph");
+      const w = el.clientWidth;
       const h = 380;
       d3.select("#graph").selectAll("*").remove();
-      const svg = d3.select("#graph").append("svg").attr("width", w).attr("height", h);
-      const link = svg.append("g").attr("stroke", "#3a4252").selectAll("line").data(edges)
-        .join("line").attr("stroke-width", 1);
-      const node = svg.append("g").selectAll("circle").data(nodes)
-        .join("circle").attr("r", 6).attr("fill", "#5fd0b5");
-      node.append("title").text(d => d.title || d.id);
-      const sim = d3.forceSimulation(nodes)
-        .force("link", d3.forceLink(edges).id(d => d.id).distance(80))
-        .force("charge", d3.forceManyBody().strength(-180))
-        .force("center", d3.forceCenter(w / 2, h / 2));
-      sim.on("tick", () => {
-        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
-            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
-        node.attr("cx", d => d.x).attr("cy", d => d.y);
+      if (!topics.length) return;
+
+      const titleMap = {};
+      docs.forEach(d => { titleMap[d.doc_id] = d.title || d.doc_id; });
+
+      const colors = d3.schemeTableau10;
+      const cols = Math.ceil(Math.sqrt(topics.length));
+      const rows = Math.ceil(topics.length / cols);
+      const cellW = w / cols;
+      const cellH = h / rows;
+
+      // Assign each cluster a grid cell center and color
+      const clusterMeta = {};
+      topics.forEach((topic, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        clusterMeta[i] = {
+          x: (col + 0.5) * cellW,
+          y: (row + 0.5) * cellH,
+          label: topic.label,
+          color: colors[i % colors.length],
+        };
       });
+
+      // Build node list
+      const nodes = [];
+      topics.forEach((topic, i) => {
+        const c = clusterMeta[i];
+        topic.doc_ids.forEach(doc_id => {
+          nodes.push({
+            id: doc_id,
+            title: titleMap[doc_id] || doc_id,
+            cluster: i,
+            x: c.x + (Math.random() - 0.5) * 30,
+            y: c.y + (Math.random() - 0.5) * 30,
+          });
+        });
+      });
+
+      const svg = d3.select("#graph").append("svg").attr("width", w).attr("height", h);
+
+      // Cluster labels at top of each cell
+      topics.forEach((_, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        svg.append("text")
+          .attr("x", (col + 0.5) * cellW)
+          .attr("y", row * cellH + 14)
+          .attr("text-anchor", "middle")
+          .attr("fill", clusterMeta[i].color)
+          .attr("font-size", "11px")
+          .attr("font-weight", "600")
+          .attr("opacity", 0.9)
+          .text(clusterMeta[i].label);
+      });
+
+      // Dividers between cells
+      for (let c = 1; c < cols; c++) {
+        svg.append("line")
+          .attr("x1", c * cellW).attr("y1", 0)
+          .attr("x2", c * cellW).attr("y2", h)
+          .attr("stroke", "#2b313a").attr("stroke-width", 1);
+      }
+      for (let r = 1; r < rows; r++) {
+        svg.append("line")
+          .attr("x1", 0).attr("y1", r * cellH)
+          .attr("x2", w).attr("y2", r * cellH)
+          .attr("stroke", "#2b313a").attr("stroke-width", 1);
+      }
+
+      const nodeEl = svg.append("g").selectAll("circle").data(nodes)
+        .join("circle")
+        .attr("r", 7)
+        .attr("fill", d => clusterMeta[d.cluster].color)
+        .attr("opacity", 0.85)
+        .attr("cursor", "pointer")
+        .on("click", (event, d) => {
+          window.open(
+            "/file?corpus=" + encodeURIComponent(corpus) + "&path=" + encodeURIComponent(d.id),
+            "_blank", "noopener"
+          );
+        });
+
+      nodeEl.append("title").text(d => d.title);
+
+      // Custom force: pull each node toward its cluster center
+      function clusterForce(alpha) {
+        nodes.forEach(d => {
+          const c = clusterMeta[d.cluster];
+          d.vx += (c.x - d.x) * 0.15 * alpha;
+          d.vy += (c.y - d.y) * 0.15 * alpha;
+        });
+      }
+
+      d3.forceSimulation(nodes)
+        .force("cluster", clusterForce)
+        .force("charge", d3.forceManyBody().strength(-25))
+        .force("collide", d3.forceCollide(9))
+        .on("tick", () => {
+          nodeEl.attr("cx", d => d.x).attr("cy", d => d.y);
+        });
     }
 
     document.getElementById("ask").addEventListener("click", ask);
