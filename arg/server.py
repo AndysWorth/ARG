@@ -123,8 +123,12 @@ def create_app(pipelines: dict[str, ARGPipeline]) -> FastAPI:
     # ------------------------------------------------------------------
 
     @app.get("/corpus")
-    def list_corpus(corpus: str = Query("default")) -> list[dict[str, Any]]:
-        return _pipeline(corpus).explorer.list_all_documents()
+    def list_corpus(
+        corpus: str = Query("default"),
+        limit: int = Query(0, ge=0, description="Max docs to return (0 = all)"),
+        offset: int = Query(0, ge=0),
+    ) -> list[dict[str, Any]]:
+        return _pipeline(corpus).explorer.list_all_documents(limit=limit, offset=offset)
 
     @app.post("/corpus/add")
     def add_document(
@@ -154,8 +158,12 @@ def create_app(pipelines: dict[str, ARGPipeline]) -> FastAPI:
     # ------------------------------------------------------------------
 
     @app.get("/corpus/graph")
-    def graph_json(corpus: str = Query("default")) -> dict[str, Any]:
-        return _pipeline(corpus).explorer.get_graph_json()
+    def graph_json(
+        corpus: str = Query("default"),
+        max_nodes: int = Query(500, ge=1, le=5000),
+        max_edges: int = Query(2000, ge=1, le=20000),
+    ) -> dict[str, Any]:
+        return _pipeline(corpus).explorer.get_graph_json(max_nodes=max_nodes, max_edges=max_edges)
 
     @app.get("/corpus/{doc_id:path}/linked-by")
     def linked_by(doc_id: str, corpus: str = Query("default")) -> list[dict[str, Any]]:

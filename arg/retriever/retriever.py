@@ -110,6 +110,11 @@ class HybridRetriever:
         # Load BM25 once at startup. Re-indexing rebuilds the file on disk;
         # callers that want the freshly-written index call :meth:`reload`.
         self._bm25 = BM25Index.load(bm25_index_path)
+        # In-memory cluster cache: avoids re-reading + JSON-parsing the cache
+        # file on every query. Invalidated by mtime change (written by explorer
+        # after recompute) or by reload().
+        self._cluster_cache: dict[str, Any] | None = None
+        self._cluster_cache_mtime: float = -1.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -118,6 +123,8 @@ class HybridRetriever:
     def reload(self) -> None:
         """Re-read the BM25 pickle. Call after a re-index from the indexer."""
         self._bm25 = BM25Index.load(self._bm25_path)
+        self._cluster_cache = None  # force re-read from disk on next query
+        self._cluster_cache_mtime = -1.0
         logger.info("retriever: BM25 index reloaded")
 
     def retrieve(
@@ -205,7 +212,7 @@ class HybridRetriever:
         # documents to make clustering meaningful).
         cluster_data = self._load_cluster_cache()
         if cluster_data is not None:
-            total_docs = len(self.kg.list_all_documents())
+            total_docs = self.kg.count_documents()
             if total_docs >= self.config.min_cluster_docs:
                 cluster_for_seed = cluster_data["doc_to_cluster"].get(seeds[0])
                 if cluster_for_seed is not None:
@@ -257,20 +264,33 @@ class HybridRetriever:
     def _load_cluster_cache(self) -> dict[str, Any] | None:
         if self._cluster_cache_path is None:
             return None
-        if not Path(self._cluster_cache_path).is_file():
+        path = Path(self._cluster_cache_path)
+        if not path.is_file():
+            self._cluster_cache = None
             return None
         try:
-            with Path(self._cluster_cache_path).open("r", encoding="utf-8") as fh:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None
+        # Return the in-memory copy when the file hasn't changed since last read.
+        if self._cluster_cache is not None and mtime == self._cluster_cache_mtime:
+            return self._cluster_cache
+        try:
+            with path.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if (
                 not isinstance(data, dict)
                 or "doc_to_cluster" not in data
                 or "cluster_members" not in data
             ):
+                self._cluster_cache = None
                 return None
+            self._cluster_cache = data
+            self._cluster_cache_mtime = mtime
             return data
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Could not load cluster cache %s: %s", self._cluster_cache_path, exc)
+            self._cluster_cache = None
             return None
 
     # ------------------------------------------------------------------
@@ -424,16 +444,34 @@ class HybridRetriever:
         if not linked_doc_ids:
             return []
 
+        # Cap linked docs to keep the Chroma $in filter tractable.
+        _MAX_LINKED = 50
+        if len(linked_doc_ids) > _MAX_LINKED:
+            linked_doc_ids = set(sorted(linked_doc_ids)[:_MAX_LINKED])
+
         qvec = self.embedder.embed(query)
+
+        # Single batch query across all linked docs instead of N sequential
+        # queries — reduces Chroma round-trips from O(linked) to O(1).
+        batch_filter = _combine_where(chroma_filters, _doc_ids_filter(linked_doc_ids))
+        batch_hits = self._chroma_query(
+            qvec,
+            top_k=self.config.top_k_graph * len(linked_doc_ids),
+            where=batch_filter,
+        )
+
+        # Bucket by doc_id, keep top_k_graph per doc, then flatten.
+        per_doc: dict[str, list[_ChunkHit]] = {}
+        for hit in batch_hits:
+            did = hit.metadata.get("doc_id", "")
+            if did in linked_doc_ids:
+                per_doc.setdefault(did, []).append(hit)
+
         graph_hits: list[_ChunkHit] = []
         rank_counter = 0
-        for did in sorted(linked_doc_ids):
-            scoped = _combine_where(chroma_filters, {"doc_id": did})
-            doc_hits = self._chroma_query(qvec, top_k=self.config.top_k_graph, where=scoped)
-            for hit in doc_hits:
+        for did in sorted(per_doc):
+            for hit in per_doc[did][: self.config.top_k_graph]:
                 rank_counter += 1
-                # Re-tag the hit with the graph stage so RRF sees it as a
-                # separate signal.
                 hit.stage_scores = {"graph": hit.stage_scores.get("dense", 0.0)}
                 hit.stage_ranks = {"graph": rank_counter}
                 graph_hits.append(hit)

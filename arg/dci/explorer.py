@@ -74,14 +74,14 @@ class CorpusExplorer:
     # Trivial passthrough surfaces (1, 2, 3)
     # ------------------------------------------------------------------
 
-    def list_all_documents(self) -> list[dict[str, Any]]:
-        return self.kg.list_all_documents()
+    def list_all_documents(self, limit: int = 0, offset: int = 0) -> list[dict[str, Any]]:
+        return self.kg.list_all_documents(limit=limit, offset=offset)
 
     def get_reverse_links(self, doc_id: str) -> list[dict[str, Any]]:
         return self.kg.get_reverse_links(doc_id)
 
-    def get_graph_json(self) -> dict[str, list[dict[str, Any]]]:
-        return self.kg.get_graph_json()
+    def get_graph_json(self, max_nodes: int = 500, max_edges: int = 2000) -> dict[str, Any]:
+        return self.kg.get_graph_json(max_nodes=max_nodes, max_edges=max_edges)
 
     # ------------------------------------------------------------------
     # Analytics (6)
@@ -216,9 +216,11 @@ class CorpusExplorer:
                 "cluster_members": {"all": list(doc_ids)},
                 "labels": {"all": "All documents"},
             }
-        # Normalise to list-of-lists so k-means and the zip() below behave
-        # the same whether Chroma returns ndarray or list.
-        embeddings = [list(map(float, row)) for row in embeddings_obj]
+        # numpy array accepted directly by KMeans — avoids the list-of-lists
+        # conversion that would double peak memory for large embedding matrices.
+        import numpy as np
+
+        embeddings = np.asarray(embeddings_obj, dtype=float)
 
         from sklearn.cluster import KMeans
 

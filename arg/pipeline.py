@@ -96,6 +96,8 @@ class ARGPipeline:
         self.corpus_name = corpus_name
         self._lock = threading.RLock()
         self._closed = False
+        self._bm25_rebuild_lock = threading.Lock()
+        self._bm25_rebuild_timer: threading.Timer | None = None
 
         # ------- Pre-flight ----------------------------------------------------
         if not skip_health_check:
@@ -402,6 +404,29 @@ class ARGPipeline:
         self.explorer.invalidate_cluster_cache()
         self.explorer.get_topic_clusters()
 
+    def _schedule_bm25_rebuild(self) -> None:
+        """Debounce BM25 rebuild: 5 s after the last watcher event fires."""
+        with self._bm25_rebuild_lock:
+            if self._bm25_rebuild_timer is not None:
+                self._bm25_rebuild_timer.cancel()
+            timer = threading.Timer(5.0, self._flush_bm25_rebuild)
+            timer.daemon = True
+            self._bm25_rebuild_timer = timer
+            timer.start()
+
+    def _flush_bm25_rebuild(self) -> None:
+        """Write BM25 index and reload retriever after watcher events settle."""
+        if self._closed:
+            return
+        try:
+            with self._lock:
+                if self._closed:
+                    return
+                self.indexer._write_bm25_index()
+                self.retriever.reload()
+        except Exception:
+            logger.exception("Error in deferred BM25 rebuild")
+
     def _extract_one(self, path: Path) -> Document | None:
         """Dispatch to the appropriate extractor. Returns ``None`` for skips
         (encrypted PDFs, non-indexable suffixes)."""
@@ -492,6 +517,11 @@ class ARGPipeline:
             if self._closed:
                 return
             self._closed = True
+        with self._bm25_rebuild_lock:
+            if self._bm25_rebuild_timer is not None:
+                self._bm25_rebuild_timer.cancel()
+                self._bm25_rebuild_timer = None
+        with self._lock:
             if self.watcher is not None:
                 try:
                     self.watcher.stop()
@@ -550,7 +580,7 @@ class ARGPipeline:
             if event_kind in (EVENT_CREATED, EVENT_MODIFIED):
                 self._add_or_update_via_path(path)
             elif event_kind == EVENT_DELETED:
-                self.remove_document(str(path.resolve()))
+                self._watcher_remove_document(str(path.resolve()))
         except Exception:
             logger.exception("Error handling watcher event %s for %s", event_kind, path)
 
@@ -559,7 +589,17 @@ class ARGPipeline:
         if doc is None:
             return
         with self._lock:
-            self.indexer.update_document(doc)
-            self.retriever.reload()
+            # Skip per-file BM25 rebuild; the deferred rebuild below batches
+            # all rapid watcher events into a single O(corpus) rebuild.
+            self.indexer.update_document(doc, skip_bm25_write=True)
             self.explorer.invalidate_cluster_cache()
             self._invalidate_summary(doc.path.resolve())
+        self._schedule_bm25_rebuild()
+
+    def _watcher_remove_document(self, doc_id: str) -> None:
+        """Like remove_document but debounces the BM25 rebuild."""
+        with self._lock:
+            self.indexer.remove_document(doc_id, skip_bm25_write=True)
+            self._recompute_clusters()
+            self._invalidate_summary(Path(doc_id))
+        self._schedule_bm25_rebuild()

@@ -85,6 +85,7 @@
 
       <h2 style="margin-top: 24px;">Topic clusters</h2>
       <div id="graph"></div>
+      <div id="graph-notice" style="display:none;font-size:11px;color:#9aa3b2;margin-top:4px;"></div>
     </section>
 
     <div class="right">
@@ -196,6 +197,13 @@
           api("/corpus"), api("/corpus/topics"), api("/corpus/graph")
         ]);
         renderClusterGraph(docs, topics, graphData.edges || []);
+        const notice = document.getElementById("graph-notice");
+        if (graphData.truncated) {
+          notice.textContent = "Corpus too large to display in full — graph shows a sample of nodes and edges.";
+          notice.style.display = "";
+        } else {
+          notice.style.display = "none";
+        }
       } catch (e) { /* graph optional */ }
     }
 

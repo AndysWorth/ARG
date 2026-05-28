@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from rank_bm25 import BM25Okapi
 
 logger = logging.getLogger(__name__)
@@ -132,10 +133,9 @@ class BM25Index:
         if not tokens:
             return []
         scores = self.bm25.get_scores(tokens)  # type: ignore[union-attr]
-        return sorted(
-            zip(self.chunk_ids, scores, strict=True),
-            key=lambda x: (-float(x[1]), x[0]),
-        )
+        # numpy argsort is faster than Python sorted() for large arrays
+        order = np.argsort(-scores)
+        return [(self.chunk_ids[int(i)], float(scores[i])) for i in order]
 
     def query(self, q: str, top_k: int = 10) -> list[tuple[str, float]]:
         """Return ``[(chunk_id, score), ...]`` ranked by BM25 score, descending."""
@@ -145,10 +145,14 @@ class BM25Index:
         if not tokens:
             return []
         scores = self.bm25.get_scores(tokens)  # type: ignore[union-attr]
-        # Pair with chunk_ids and pick top_k by score desc, breaking ties by
-        # chunk_id for deterministic results.
-        ranked = sorted(
-            zip(self.chunk_ids, scores, strict=True),
-            key=lambda x: (-float(x[1]), x[0]),
-        )
-        return [(cid, float(score)) for cid, score in ranked[:top_k] if score > 0]
+        n = len(scores)
+        if n == 0:
+            return []
+        k = min(top_k, n)
+        # argpartition: O(n) to isolate top-k, then O(k log k) to sort them.
+        # Significantly faster than O(n log n) full sort when top_k << n.
+        top_idx = np.argpartition(-scores, k - 1)[:k] if k < n else np.arange(n)
+        top_idx = top_idx[np.argsort(-scores[top_idx])]
+        return [
+            (self.chunk_ids[int(i)], float(scores[i])) for i in top_idx if float(scores[i]) > 0
+        ][:top_k]

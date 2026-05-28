@@ -314,13 +314,22 @@ class KnowledgeGraph:
             {"doc_id": row[0], "title": row[1], "anchor_text": row[2]} for row in _iter_rows(result)
         ]
 
-    def list_all_documents(self) -> list[dict[str, Any]]:
-        """All Document nodes, sorted by doc_id."""
-        result = self._conn.execute(
+    def list_all_documents(self, limit: int = 0, offset: int = 0) -> list[dict[str, Any]]:
+        """All Document nodes, sorted by doc_id.
+
+        ``limit=0`` means no limit (return all).  ``offset`` is only applied
+        when ``limit > 0``.
+        """
+        query = (
             "MATCH (d:Document) "
             "RETURN d.doc_id, d.title, d.file_type, d.chunk_count "
             "ORDER BY d.doc_id"
         )
+        if limit > 0:
+            if offset > 0:
+                query += f" SKIP {int(offset)}"
+            query += f" LIMIT {int(limit)}"
+        result = self._conn.execute(query)
         return [
             {
                 "doc_id": row[0],
@@ -331,14 +340,25 @@ class KnowledgeGraph:
             for row in _iter_rows(result)
         ]
 
-    def get_graph_json(self) -> dict[str, list[dict[str, Any]]]:
-        """Return ``{"nodes": [...], "edges": [...]}`` for D3 rendering."""
+    def count_documents(self) -> int:
+        """Fast document count without materialising all rows."""
+        return self._scalar_int("MATCH (d:Document) RETURN count(d)")
+
+    def get_graph_json(self, max_nodes: int = 500, max_edges: int = 2000) -> dict[str, Any]:
+        """Return ``{"nodes": [...], "edges": [...]}`` for D3 rendering.
+
+        Caps at ``max_nodes`` documents (ranked by chunk_count desc so the
+        most content-rich docs appear first) and ``max_edges`` link edges.
+        A ``"truncated": true`` key is added only when the cap is hit, so
+        callers that don't check it keep working without changes.
+        """
         nodes_result = self._conn.execute(
             "MATCH (d:Document) "
             "RETURN d.doc_id, d.title, d.file_type, d.chunk_count "
-            "ORDER BY d.doc_id"
+            "ORDER BY d.chunk_count DESC, d.doc_id "
+            f"LIMIT {int(max_nodes + 1)}"
         )
-        nodes = [
+        all_nodes = [
             {
                 "id": row[0],
                 "title": row[1],
@@ -347,15 +367,29 @@ class KnowledgeGraph:
             }
             for row in _iter_rows(nodes_result)
         ]
+        truncated_nodes = len(all_nodes) > max_nodes
+        nodes = all_nodes[:max_nodes]
+        included = {n["id"] for n in nodes}
 
+        # Fetch more edges than the cap so filtering to included nodes leaves
+        # enough candidates; the Python filter handles the final selection.
         edges_result = self._conn.execute(
-            "MATCH (s:Document)-[r:LINKS_TO]->(t:Document) RETURN s.doc_id, t.doc_id, r.anchor_text"
+            "MATCH (s:Document)-[r:LINKS_TO]->(t:Document) "
+            "RETURN s.doc_id, t.doc_id, r.anchor_text "
+            f"LIMIT {int(max_edges * 4)}"
         )
-        edges = [
+        filtered_edges = [
             {"source": row[0], "target": row[1], "anchor_text": row[2]}
             for row in _iter_rows(edges_result)
+            if row[0] in included and row[1] in included
         ]
-        return {"nodes": nodes, "edges": edges}
+        truncated_edges = len(filtered_edges) > max_edges
+        edges = filtered_edges[:max_edges]
+
+        result: dict[str, Any] = {"nodes": nodes, "edges": edges}
+        if truncated_nodes or truncated_edges:
+            result["truncated"] = True
+        return result
 
     # ------------------------------------------------------------------
     # Analytics

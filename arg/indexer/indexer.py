@@ -198,14 +198,15 @@ class Indexer:
     # Single-document ops (for the watcher)
     # ------------------------------------------------------------------
 
-    def add_document(self, doc: Document) -> int:
+    def add_document(self, doc: Document, *, skip_bm25_write: bool = False) -> int:
         """Re-index one document. Returns the number of chunks written."""
         n = self._index_one(doc)
-        self._write_bm25_index()
+        if not skip_bm25_write:
+            self._write_bm25_index()
         self._save_hashes()
         return n
 
-    def remove_document(self, doc_id: str) -> None:
+    def remove_document(self, doc_id: str, *, skip_bm25_write: bool = False) -> None:
         """Remove a document end-to-end: Chroma chunks, Chroma doc, Kuzu."""
         chunk_ids = self.kg.get_chunks_for_doc(doc_id)
         if chunk_ids:
@@ -214,14 +215,20 @@ class Indexer:
         self._docs_coll.delete(ids=[doc_id])
         self.kg.remove_document(doc_id)
         self._hashes.pop(doc_id, None)
-        self._write_bm25_index()
+        if not skip_bm25_write:
+            self._write_bm25_index()
         self._save_hashes()
 
-    def update_document(self, doc: Document) -> int:
-        """Wholesale replace one document's index footprint."""
+    def update_document(self, doc: Document, *, skip_bm25_write: bool = False) -> int:
+        """Wholesale replace one document's index footprint.
+
+        Always skips the intermediate BM25 rebuild after remove — only one
+        rebuild happens at the end (in add_document), halving the work vs the
+        previous two-rebuild pattern.
+        """
         doc_id = str(doc.path.resolve())
-        self.remove_document(doc_id)
-        return self.add_document(doc)
+        self.remove_document(doc_id, skip_bm25_write=True)
+        return self.add_document(doc, skip_bm25_write=skip_bm25_write)
 
     # ------------------------------------------------------------------
     # Internal: per-doc work
