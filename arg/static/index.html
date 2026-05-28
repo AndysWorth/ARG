@@ -212,6 +212,7 @@
       const rows = Math.ceil(topics.length / cols);
       const cellW = w / cols;
       const cellH = h / rows;
+      const LABEL_H = 28; // pixels reserved at top of each cell for the label
 
       const clusterMeta = {};
       topics.forEach((topic, i) => {
@@ -219,7 +220,8 @@
         const row = Math.floor(i / cols);
         clusterMeta[i] = {
           x: (col + 0.5) * cellW,
-          y: (row + 0.5) * cellH,
+          // center is in the usable area below the label strip
+          y: row * cellH + LABEL_H + (cellH - LABEL_H) / 2,
           label: topic.label,
           color: colors[i % colors.length],
         };
@@ -254,13 +256,13 @@
       // All zoomable content goes in this group
       const g = svg.append("g");
 
-      // Cluster labels
+      // Cluster labels — positioned in the reserved strip above the dots
       topics.forEach((_, i) => {
         const col = i % cols;
         const row = Math.floor(i / cols);
         g.append("text")
           .attr("x", (col + 0.5) * cellW)
-          .attr("y", row * cellH + 14)
+          .attr("y", row * cellH + LABEL_H - 10)
           .attr("text-anchor", "middle")
           .attr("fill", clusterMeta[i].color)
           .attr("font-size", "11px")
