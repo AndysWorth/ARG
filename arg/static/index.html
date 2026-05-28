@@ -192,12 +192,14 @@
     async function refreshGraph() {
       if (!window.d3) return;
       try {
-        const [docs, topics] = await Promise.all([api("/corpus"), api("/corpus/topics")]);
-        renderClusterGraph(docs, topics);
+        const [docs, topics, graphData] = await Promise.all([
+          api("/corpus"), api("/corpus/topics"), api("/corpus/graph")
+        ]);
+        renderClusterGraph(docs, topics, graphData.edges || []);
       } catch (e) { /* graph optional */ }
     }
 
-    function renderClusterGraph(docs, topics) {
+    function renderClusterGraph(docs, topics, edges) {
       const el = document.getElementById("graph");
       const w = el.clientWidth;
       const h = 380;
@@ -248,6 +250,21 @@
             y: c.y + (Math.random() - 0.5) * 30,
           });
         });
+      });
+
+      // Build node lookup and deduplicated link list
+      const nodeById = {};
+      nodes.forEach(n => { nodeById[n.id] = n; });
+      const seen = new Set();
+      const links = [];
+      edges.forEach(e => {
+        const src = nodeById[e.source];
+        const tgt = nodeById[e.target];
+        if (!src || !tgt || src === tgt) return;
+        const key = [e.source, e.target].sort().join("~");
+        if (seen.has(key)) return;
+        seen.add(key);
+        links.push({ source: src, target: tgt });
       });
 
       const svg = d3.select("#graph").append("svg")
@@ -308,6 +325,15 @@
       function shapeFor(fileType) {
         return shapeMap[fileType] || d3.symbolDiamond;
       }
+
+      // Link lines drawn before nodes so they appear behind
+      const linkEl = g.append("g")
+        .attr("stroke", "#3d4553")
+        .attr("stroke-width", 1)
+        .attr("stroke-opacity", 0.55)
+        .selectAll("line")
+        .data(links)
+        .join("line");
 
       const nodeEl = g.append("g").selectAll("path").data(nodes)
         .join("path")
@@ -381,6 +407,9 @@
         .force("charge", d3.forceManyBody().strength(-25))
         .force("collide", d3.forceCollide(9))
         .on("tick", () => {
+          linkEl
+            .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
           nodeEl.attr("transform", d => `translate(${d.x},${d.y})`);
         });
     }
