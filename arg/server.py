@@ -273,6 +273,25 @@ def create_app(pipelines: dict[str, ARGPipeline]) -> FastAPI:
         }
 
     # ------------------------------------------------------------------
+    # File serving — lets the UI open source documents in a new tab
+    # ------------------------------------------------------------------
+
+    @app.get("/file")
+    def serve_file(
+        path: str = Query(..., min_length=1),
+        corpus: str = Query("default"),
+    ) -> Any:
+        p = _pipeline(corpus)
+        requested = Path(path).resolve()
+        try:
+            requested.relative_to(p.config.docs_root.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="path is outside docs_root") from None
+        if not requested.is_file():
+            raise HTTPException(status_code=404, detail=f"no such file: {requested}")
+        return FileResponse(str(requested))
+
+    # ------------------------------------------------------------------
     # Static UI
     # ------------------------------------------------------------------
 

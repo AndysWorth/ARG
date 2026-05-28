@@ -51,6 +51,8 @@
     .sources { margin-top: 16px; font-size: 12px; }
     .source-row { padding: 4px 0; color: var(--muted); }
     .source-row .title { color: var(--fg); }
+    .source-row a.title { text-decoration: none; }
+    .source-row a.title:hover { color: var(--accent); text-decoration: underline; }
     #graph { height: 380px; background: var(--panel); border-radius: 6px; }
     .pill {
       display: inline-block; padding: 2px 8px; border-radius: 999px;
@@ -177,8 +179,10 @@
         const data = await r.json();
         answerEl.textContent = data.answer || "(no answer)";
         sourcesEl.innerHTML = "<h2>Sources</h2>" + data.sources.map(s =>
-          "<div class='source-row'><span class='title'>" + (s.title || s.doc_id) + "</span> — " +
-          s.heading_path + "</div>"
+          "<div class='source-row'><a class='title' href='/file?corpus=" +
+          encodeURIComponent(corpus) + "&path=" + encodeURIComponent(s.doc_id) +
+          "' target='_blank' rel='noopener'>" + (s.title || s.doc_id) + "</a>" +
+          (s.heading_path ? " — " + s.heading_path : "") + "</div>"
         ).join("");
       } catch (e) {
         answerEl.textContent = e.message;
