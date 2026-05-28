@@ -214,14 +214,18 @@
       const cellH = h / rows;
       const LABEL_H = 28; // pixels reserved at top of each cell for the label
 
+      const R = 9; // node radius + padding for boundary
       const clusterMeta = {};
       topics.forEach((topic, i) => {
         const col = i % cols;
         const row = Math.floor(i / cols);
         clusterMeta[i] = {
           x: (col + 0.5) * cellW,
-          // center is in the usable area below the label strip
           y: row * cellH + LABEL_H + (cellH - LABEL_H) / 2,
+          minY: row * cellH + LABEL_H + R,
+          maxY: (row + 1) * cellH - R,
+          minX: col * cellW + R,
+          maxX: (col + 1) * cellW - R,
           label: topic.label,
           color: colors[i % colors.length],
         };
@@ -319,8 +323,20 @@
         });
       }
 
+      // Hard boundary: nodes cannot cross into the label strip or outside their cell
+      function boundaryForce() {
+        nodes.forEach(d => {
+          const c = clusterMeta[d.cluster];
+          if (d.y < c.minY) { d.y = c.minY; d.vy = Math.abs(d.vy || 0); }
+          if (d.y > c.maxY) { d.y = c.maxY; d.vy = -Math.abs(d.vy || 0); }
+          if (d.x < c.minX) { d.x = c.minX; d.vx = Math.abs(d.vx || 0); }
+          if (d.x > c.maxX) { d.x = c.maxX; d.vx = -Math.abs(d.vx || 0); }
+        });
+      }
+
       d3.forceSimulation(nodes)
         .force("cluster", clusterForce)
+        .force("boundary", boundaryForce)
         .force("charge", d3.forceManyBody().strength(-25))
         .force("collide", d3.forceCollide(9))
         .on("tick", () => {
