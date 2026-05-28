@@ -153,6 +153,7 @@ class Generator:
 
         prompt = self._build_prompt(processed.raw_query, chunks)
         answer = self.llm.complete(prompt).strip()
+        logger.info("generator: query answered in %dms — %r", _elapsed_ms(start), query[:80])
         return ARGResult(
             answer=answer,
             sources=_to_source_refs(chunks),

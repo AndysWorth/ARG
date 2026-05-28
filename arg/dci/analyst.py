@@ -122,6 +122,7 @@ class CorpusAnalyst:
                 with cache_path.open("r", encoding="utf-8") as fh:
                     cached = json.load(fh)
                 if isinstance(cached, dict) and "summary" in cached:
+                    logger.info("analyst: summary cache hit for %s", Path(doc_id).name)
                     return str(cached["summary"])
             except (OSError, json.JSONDecodeError) as exc:
                 logger.warning("Could not read summary cache %s: %s", cache_path, exc)
@@ -132,6 +133,7 @@ class CorpusAnalyst:
         joined_text = "\n\n".join(c["text"] for c in chunks)
         token_count = len(_ENCODER.encode(joined_text))
 
+        logger.info("analyst: summarizing %s via LLM", Path(doc_id).name)
         if token_count <= _BATCH_TOKEN_BUDGET:
             summary = self.llm.complete(_SUMMARY_PROMPT.format(text=joined_text)).strip()
         else:

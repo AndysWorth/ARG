@@ -172,6 +172,8 @@ class ARGPipeline:
         if not skip_signal_handlers:
             self._register_signal_handlers()
 
+        logger.info("pipeline: ready (corpus=%s, docs=%s)", corpus_name, config.docs_root)
+
     # ------------------------------------------------------------------
     # Pre-flight
     # ------------------------------------------------------------------
@@ -484,6 +486,7 @@ class ARGPipeline:
                 self.graph.close()
             except Exception:
                 logger.exception("Error closing knowledge graph")
+            logger.info("pipeline: closed")
 
     def __enter__(self) -> ARGPipeline:
         return self
@@ -527,6 +530,7 @@ class ARGPipeline:
         """Watcher hands us debounced filesystem events."""
         if self._closed:
             return
+        logger.info("watcher: %s %s", event_kind, path.name)
         try:
             if event_kind in (EVENT_CREATED, EVENT_MODIFIED):
                 self._add_or_update_via_path(path)

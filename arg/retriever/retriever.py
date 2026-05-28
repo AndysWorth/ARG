@@ -118,6 +118,7 @@ class HybridRetriever:
     def reload(self) -> None:
         """Re-read the BM25 pickle. Call after a re-index from the indexer."""
         self._bm25 = BM25Index.load(self._bm25_path)
+        logger.info("retriever: BM25 index reloaded")
 
     def retrieve(
         self,

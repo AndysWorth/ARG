@@ -247,6 +247,7 @@ class CorpusExplorer:
                 labels_map[cid] = "Cluster"
                 continue
             prompt = _CLUSTER_LABEL_PROMPT.format(titles="\n".join(sample_titles))
+            logger.info("explorer: labeling cluster %s (%d docs) via LLM", cid, len(member_doc_ids))
             label = self.llm.complete(prompt).strip().strip('"').strip("'")
             labels_map[cid] = label or "Cluster"
 
