@@ -213,7 +213,6 @@
       const cellW = w / cols;
       const cellH = h / rows;
 
-      // Assign each cluster a grid cell center and color
       const clusterMeta = {};
       topics.forEach((topic, i) => {
         const col = i % cols;
@@ -226,7 +225,6 @@
         };
       });
 
-      // Build node list
       const nodes = [];
       topics.forEach((topic, i) => {
         const c = clusterMeta[i];
@@ -241,13 +239,26 @@
         });
       });
 
-      const svg = d3.select("#graph").append("svg").attr("width", w).attr("height", h);
+      const svg = d3.select("#graph").append("svg")
+        .attr("width", w).attr("height", h)
+        .style("cursor", "grab")
+        .style("overflow", "hidden");
 
-      // Cluster labels at top of each cell
+      // Hint text — stays fixed, outside the zoomable group
+      svg.append("text")
+        .attr("x", w - 6).attr("y", h - 6)
+        .attr("text-anchor", "end")
+        .attr("fill", "#9aa3b2").attr("font-size", "10px")
+        .text("scroll to zoom · drag to pan");
+
+      // All zoomable content goes in this group
+      const g = svg.append("g");
+
+      // Cluster labels
       topics.forEach((_, i) => {
         const col = i % cols;
         const row = Math.floor(i / cols);
-        svg.append("text")
+        g.append("text")
           .attr("x", (col + 0.5) * cellW)
           .attr("y", row * cellH + 14)
           .attr("text-anchor", "middle")
@@ -258,21 +269,21 @@
           .text(clusterMeta[i].label);
       });
 
-      // Dividers between cells
+      // Dividers
       for (let c = 1; c < cols; c++) {
-        svg.append("line")
+        g.append("line")
           .attr("x1", c * cellW).attr("y1", 0)
           .attr("x2", c * cellW).attr("y2", h)
           .attr("stroke", "#2b313a").attr("stroke-width", 1);
       }
       for (let r = 1; r < rows; r++) {
-        svg.append("line")
+        g.append("line")
           .attr("x1", 0).attr("y1", r * cellH)
           .attr("x2", w).attr("y2", r * cellH)
           .attr("stroke", "#2b313a").attr("stroke-width", 1);
       }
 
-      const nodeEl = svg.append("g").selectAll("circle").data(nodes)
+      const nodeEl = g.append("g").selectAll("circle").data(nodes)
         .join("circle")
         .attr("r", 7)
         .attr("fill", d => clusterMeta[d.cluster].color)
@@ -287,7 +298,17 @@
 
       nodeEl.append("title").text(d => d.title);
 
-      // Custom force: pull each node toward its cluster center
+      // Zoom + pan
+      svg.call(
+        d3.zoom()
+          .scaleExtent([0.3, 8])
+          .on("zoom", event => {
+            g.attr("transform", event.transform);
+            svg.style("cursor", event.transform.k !== 1 || event.sourceEvent?.type === "mousemove"
+              ? "grabbing" : "grab");
+          })
+      );
+
       function clusterForce(alpha) {
         nodes.forEach(d => {
           const c = clusterMeta[d.cluster];
