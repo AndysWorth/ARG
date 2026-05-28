@@ -145,14 +145,15 @@ def extract_html(path: Path, config: ARGConfig) -> Document:
     # forgiving of malformed HTML than the stdlib parser.
     soup = BeautifulSoup(raw_bytes, features="lxml")
 
+    # Links must be collected BEFORE stripping navigation/boilerplate elements,
+    # because <nav> and sidebar divs are removed by the strip pass and would
+    # otherwise silently drop cross-document links from index pages.
+    links_to = _extract_links(soup)
+
     _strip_invisible_and_boilerplate(soup, config)
 
     title = _extract_title(soup, config)
     page_description = _extract_page_description(soup)
-
-    # Links must be collected BEFORE we discard the soup; raw href values are
-    # returned and the crawler normalises them into absolute paths.
-    links_to = _extract_links(soup)
 
     code_blocks_full, _ = _extract_and_truncate_code_blocks(soup, config)
     _convert_tables_to_markdown(soup)
