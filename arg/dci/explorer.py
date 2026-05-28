@@ -233,6 +233,18 @@ class CorpusExplorer:
             doc_to_cluster[doc_id] = cid
             cluster_members.setdefault(cid, []).append(doc_id)
 
+        # Build a lookup of frozenset(doc_ids) -> existing label from the old
+        # cache so unchanged clusters can reuse their labels without an LLM call.
+        old_cache = self._load_cluster_cache()
+        old_members: dict[str, list[str]] = {}
+        old_labels: dict[str, str] = {}
+        if old_cache is not None:
+            old_members = old_cache.get("cluster_members") or {}
+            old_labels = old_cache.get("labels") or {}
+        reuse_label: dict[frozenset[str], str] = {
+            frozenset(v): old_labels[k] for k, v in old_members.items() if k in old_labels
+        }
+
         labels_map: dict[str, str] = {}
         # Build a title map for nicer cluster-label prompts.
         title_by_id: dict[str, str] = {}
@@ -240,6 +252,10 @@ class CorpusExplorer:
             if isinstance(meta, dict):
                 title_by_id[doc_id] = str(meta.get("title", "") or "")
         for cid, member_doc_ids in cluster_members.items():
+            fs = frozenset(member_doc_ids)
+            if fs in reuse_label:
+                labels_map[cid] = reuse_label[fs]
+                continue
             sample_titles = [
                 title_by_id.get(d, "") for d in member_doc_ids[:8] if title_by_id.get(d)
             ]

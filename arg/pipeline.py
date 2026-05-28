@@ -354,6 +354,8 @@ class ARGPipeline:
             )
             self.retriever.reload()
             self._write_schema_hash()
+            logger.info("pipeline.index: computing topic clusters")
+            self.explorer.get_topic_clusters()
             return {
                 "documents_indexed": stats.documents_indexed,
                 "documents_skipped": stats.documents_skipped,
@@ -369,7 +371,7 @@ class ARGPipeline:
                 return 0
             n = self.indexer.add_document(doc)
             self.retriever.reload()
-            self.explorer.invalidate_cluster_cache()
+            self._recompute_clusters()
             self._invalidate_summary(doc.path.resolve())
             return n
 
@@ -377,7 +379,7 @@ class ARGPipeline:
         with self._lock:
             self.indexer.remove_document(doc_id)
             self.retriever.reload()
-            self.explorer.invalidate_cluster_cache()
+            self._recompute_clusters()
             self._invalidate_summary(Path(doc_id))
 
     def update_document(self, path: Path) -> int:
@@ -387,11 +389,18 @@ class ARGPipeline:
                 return 0
             n = self.indexer.update_document(doc)
             self.retriever.reload()
-            # Update is per-doc; cluster cache still invalidated since
-            # changing one doc can shift its cluster assignment.
-            self.explorer.invalidate_cluster_cache()
+            self._recompute_clusters()
             self._invalidate_summary(doc.path.resolve())
             return n
+
+    def _recompute_clusters(self) -> None:
+        """Invalidate the cluster cache and immediately recompute it.
+
+        Incremental labeling in _compute_clusters reuses labels for clusters
+        whose membership is unchanged, so only affected clusters pay an LLM call.
+        """
+        self.explorer.invalidate_cluster_cache()
+        self.explorer.get_topic_clusters()
 
     def _extract_one(self, path: Path) -> Document | None:
         """Dispatch to the appropriate extractor. Returns ``None`` for skips

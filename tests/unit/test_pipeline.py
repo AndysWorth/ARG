@@ -333,21 +333,24 @@ def test_reindex_is_idempotent(config):
         pipeline.close()
 
 
-def test_index_invalidates_cluster_cache(config):
+def test_index_recomputes_cluster_cache(config):
     _write_corpus(config.docs_root)
     pipeline = _build_pipeline(config)
     try:
         pipeline.index()
-        # Pre-populate the cache.
+        # index() now eagerly computes and caches clusters.
         cache_path = config.cluster_cache_path("default")
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        assert cache_path.is_file()
+        # Overwrite with a stale sentinel.
         cache_path.write_text(
             json.dumps({"doc_to_cluster": {}, "cluster_members": {}, "labels": {}})
         )
-        assert cache_path.is_file()
-        # Re-index → cache is invalidated.
+        # Re-index → stale cache is replaced with a freshly computed one.
         pipeline.index()
-        assert not cache_path.is_file()
+        assert cache_path.is_file()
+        data = json.loads(cache_path.read_text())
+        # Fresh cache should have actual cluster data, not the empty sentinel.
+        assert data != {"doc_to_cluster": {}, "cluster_members": {}, "labels": {}}
     finally:
         pipeline.close()
 
