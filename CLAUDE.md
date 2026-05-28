@@ -232,4 +232,41 @@ arg/
 
 ---
 
+## 20. Post-Build Behaviours (established after initial build)
+
+These behaviours were added after the original section build and are not described in `docs/spec/`. They are enforced by the existing test suite.
+
+### Clustering
+
+- `pipeline.index()` calls `explorer.get_topic_clusters()` at the end, so the cluster cache is always warm when the server starts. Do not remove this call.
+- `_compute_clusters()` performs **incremental labeling**: before calling the LLM for a cluster label, it checks whether the cluster's member set (as a `frozenset`) matches any cluster in the old cache. An exact match reuses the existing label with zero LLM calls. Only clusters whose membership changed pay an LLM call.
+- Watcher-triggered `add_document` / `update_document` / `remove_document` call `pipeline._recompute_clusters()`, which invalidates then immediately recomputes (not lazily). This keeps the UI current after file changes.
+
+### Link extraction order
+
+- In `arg/crawler/extractors.py`, `_extract_links(soup)` **must be called before** `_strip_invisible_and_boilerplate(soup, config)`. The strip pass removes `<nav>` and sidebar elements; calling it first silently drops links from index pages that use `<nav>` for cross-document navigation.
+
+### Logging
+
+Operational `INFO` log lines were added to aid observability. Do not remove them:
+
+| File | What is logged |
+|---|---|
+| `pipeline.py` | `pipeline: ready (corpus=…, docs=…, query_rewrite=…, query_decompose=…)` and `pipeline: closed` |
+| `pipeline.py` | `watcher: <event> <filename>` on every file-change event |
+| `retriever.py` | `retriever: BM25 index reloaded` after every watcher-triggered reload |
+| `generator.py` | `generator: query answered in <ms> — "<query>"` after every non-streaming answer |
+| `explorer.py` | `explorer: labeling cluster <id> (<n> docs) via LLM` before each LLM label call |
+| `analyst.py` | `analyst: summary cache hit for <file>` or `analyst: summarizing <file> via LLM` |
+
+### Web UI — `/file` endpoint
+
+`GET /file?path=<doc_id>&corpus=<name>` serves a file from `docs_root` with path-traversal protection (403 if the resolved path escapes `docs_root`). Source citations in query results link to this endpoint with `target=_blank`.
+
+### Web UI — topic cluster graph
+
+The "Document graph" panel was replaced with a topic cluster visualization. File types are distinguished by shape (circle=PDF, square=HTML, triangle=text/md, diamond=other). The graph supports scroll-to-zoom and drag-to-pan via `d3.zoom()`. Cluster labels are rendered in a reserved 28px strip at the top of each cell; a boundary force prevents dots from entering that strip.
+
+---
+
 *ARG — Archivist RAG Graph · Yarr, the docs give up their secrets to no one but us.*

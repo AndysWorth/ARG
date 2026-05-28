@@ -1,7 +1,7 @@
 # ARG — Archivist RAG Graph
 Yarr, the docs give up their secrets to no one but us.
 
-A fully local, knowledge-graph-augmented RAG system for HTML and PDF documentation.
+A fully local, knowledge-graph-augmented RAG system for HTML, PDF, and plain-text documentation.
 Runs entirely on Apple M1 Max (64GB). Zero cloud calls. Zero telemetry.
 
 ## What ARG Does
@@ -15,10 +15,11 @@ network calls during operation.
 
 Beyond Q&A, ARG provides DCI ("Direct Corpus Interaction") features for
 browsing, summarising, and comparing documents in a corpus. The corpus is live:
-a `watchdog`-backed file watcher re-indexes changed files automatically. ARG
-exposes both a CLI (`scripts/index_docs.py`) and a local web UI (FastAPI bound
-to `127.0.0.1:8000`), and supports multiple independent corpora via a
-path-convention namespace (`arg_db/{corpus_name}/`).
+a `watchdog`-backed file watcher re-indexes changed files automatically and
+updates topic clusters incrementally (only re-labeling the clusters whose
+membership changed). ARG exposes both a CLI (`scripts/index_docs.py`) and a
+local web UI (FastAPI bound to `127.0.0.1:8000`), and supports multiple
+independent corpora via a path-convention namespace (`arg_db/{corpus_name}/`).
 
 ## Architecture
 
@@ -137,14 +138,41 @@ Create `eval/qa_pairs.json` with hand-written question/answer pairs, then:
 python scripts/eval_retrieval.py --db ./arg_db --corpus default --qa eval/qa_pairs.json
 ```
 
+## Web UI
+
+Open `http://localhost:8000` after starting the server. The UI provides:
+
+- **Ask** — type a question; sources are shown as clickable links that open the document in a new tab
+- **Topic clusters** — visual map of documents grouped by topic (scroll to zoom, drag to pan, click a shape to open the file). Shapes indicate file type: circle = PDF, square = HTML, triangle = text/markdown, diamond = other. Clusters are computed at the end of `index` and kept current by the watcher.
+- **Documents** — sidebar list of all indexed files; click to see key points and metadata
+- **Topics** — sidebar list of LLM-generated cluster labels
+
 ## Configuration
 
 All tunables live in `.env` (copy from `.env.example`). Key settings:
 
 - `CHUNK_SIZE=1024`          — token window per chunk
 - `ENRICH_MIN_SCORE=0.5`     — DCI enrichment threshold (tune with `eval_retrieval.py`)
-- `QUERY_REWRITE=true`       — rewrite conversational queries to technical language
+- `QUERY_REWRITE=false`      — rewrite conversational queries (disable for speed)
+- `QUERY_DECOMPOSE=false`    — decompose compound queries (disable for speed)
 - `BM25_ENABLED=true`        — sparse exact-term retrieval alongside dense
+- `WATCH_ENABLED=true`       — auto re-index files changed on disk
+- `OLLAMA_TIMEOUT=300`       — seconds before an Ollama call times out
+
+## Logging
+
+Logs are written to `{db}/{corpus}/arg.log` in JSON format. Key messages to watch for:
+
+| Logger | Message | Meaning |
+|---|---|---|
+| `arg.pipeline` | `pipeline: ready (…query_rewrite=… query_decompose=…)` | Startup — confirms env-var overrides took effect |
+| `arg.pipeline` | `watcher: modified foo.pdf` | File change detected; re-indexing triggered |
+| `arg.retriever` | `retriever: BM25 index reloaded` | BM25 updated after watcher re-index |
+| `arg.generator` | `generator: query answered in 4321ms — "…"` | Query completed |
+| `arg.dci.explorer` | `explorer: labeling cluster c2 (16 docs) via LLM` | Cluster label being generated |
+| `arg.dci.analyst` | `analyst: summary cache hit for foo.pdf` | Summary served from cache (no LLM call) |
+
+Stream logs live with `tail -f {db}/default/arg.log`. Add `--debug` to the serve command for verbose tracing.
 
 ## Known Limitations
 
