@@ -205,7 +205,11 @@
       if (!topics.length) return;
 
       const titleMap = {};
-      docs.forEach(d => { titleMap[d.doc_id] = d.title || d.doc_id; });
+      const fileTypeMap = {};
+      docs.forEach(d => {
+        titleMap[d.doc_id] = d.title || d.doc_id;
+        fileTypeMap[d.doc_id] = d.file_type || '';
+      });
 
       const colors = d3.schemeTableau10;
       const cols = Math.ceil(Math.sqrt(topics.length));
@@ -238,6 +242,7 @@
           nodes.push({
             id: doc_id,
             title: titleMap[doc_id] || doc_id,
+            fileType: fileTypeMap[doc_id] || '',
             cluster: i,
             x: c.x + (Math.random() - 0.5) * 30,
             y: c.y + (Math.random() - 0.5) * 30,
@@ -302,7 +307,7 @@
           );
         });
 
-      nodeEl.append("title").text(d => d.title);
+      nodeEl.append("title").text(d => d.title + (d.fileType ? ' [' + d.fileType + ']' : ''));
 
       // Zoom + pan
       svg.call(
