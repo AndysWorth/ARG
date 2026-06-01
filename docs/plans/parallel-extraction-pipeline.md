@@ -3,11 +3,10 @@
 Findings from live log analysis and hardware analysis of a 1500+ document corpus
 run on Apple M1 Max (10-core CPU, 32-core GPU, 16-core Neural Engine, 64GB RAM).
 
-**Ready to plan as Feature 0005, after Feature 0004 (`pdf-extraction-efficiency`)
-is implemented.** Feature 0003 merged 2026-06-01. Implement `pdf-extraction-efficiency`
-first — those items reduce the extraction problem before adding concurrency to it,
-and they establish the `embed_num_ctx` and `embed_batch_size` config fields that
-Item 1 of this plan depends on.
+**COMPLETE — merged to main 2026-06-01 as Feature 0005.**
+Items 1–3 shipped (embed_batch batching, dirwalk parallel pool, extraction_workers config).
+Item 4 (page-level parallelism) deferred per plan — only needed if profiling shows large
+PDFs are still bottlenecks after Items 1–3.
 
 ---
 
