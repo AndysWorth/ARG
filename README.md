@@ -176,6 +176,24 @@ Stream logs live with `tail -f {db}/default/arg.log`. Add `--debug` to the serve
 
 ## Known Limitations
 
+- **Only four file types are indexed** — `.pdf`, `.html`/`.htm`, `.txt`, and `.md`.
+  Everything else in the corpus directory is silently skipped. This includes:
+  - Images (`.jpg`, `.jpeg`, `.png`, `.heic`, `.tiff`, `.gif`, `.webp`, `.svg`)
+  - Office documents (`.docx`, `.xlsx`, `.pptx`, `.doc`, `.xls`)
+  - Stylesheets, scripts, and web fonts (`.css`, `.js`, `.woff`, `.woff2`)
+  - Resource files inside browser-saved-page directories (e.g. `PageName_files/`)
+  - Archives (`.zip`, `.tar`, `.gz`)
+  - Audio and video files (`.mp3`, `.mp4`, `.mov`, `.m4a`)
+  - macOS metadata files (`.DS_Store`, `._*`)
+  - Any file in a hidden directory (names starting with `.`)
+
+  As a result, `find . -type f | wc -l` on your corpus will report a larger
+  number than ARG's indexed document count. To get a comparable count:
+  ```bash
+  find . -type f \( -iname "*.pdf" -o -iname "*.html" -o -iname "*.htm" \
+    -o -iname "*.txt" -o -iname "*.md" \) | wc -l
+  ```
+
 - **Markdown structure** is not parsed — `.md` and `.markdown` files index
   as plain text. Atx-style headings (`# H1`, `## H2`) are not recognised
   as chunk boundaries. A future feature may add Markdown-aware extraction.
