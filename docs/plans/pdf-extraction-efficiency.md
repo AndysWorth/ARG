@@ -2,9 +2,8 @@
 
 Findings from live log analysis of a 1500+ document corpus run on 2026-05-28/29.
 
-**Ready to implement as Feature 0004.** Feature 0003 merged 2026-06-01.
-Implement `parallel-extraction-pipeline` items after this plan (see that plan's
-ordering note). All items below are independent of each other unless noted.
+**COMPLETE — merged to main 2026-06-01 as Feature 0004.**
+`parallel-extraction-pipeline` is now unblocked (Feature 0005).
 
 ---
 
