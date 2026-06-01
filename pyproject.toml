@@ -14,11 +14,11 @@ dependencies = [
     "llama-index-embeddings-ollama==0.9.0",
     # Stores
     "chromadb>=0.5",
-    "kuzu>=0.6",
+    "kuzu>=0.6,<0.13",
     # Parsing
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
-    "pdfplumber>=0.11",
+    "pdfplumber>=0.11,<0.12",
     "pymupdf>=1.24",
     # File watching
     "watchdog>=4.0",
@@ -31,7 +31,7 @@ dependencies = [
     # DCI clustering
     "scikit-learn>=1.4",
     # Sparse retrieval
-    "bm25s>=0.2",
+    "bm25s>=0.2,<1.0",
 ]
 
 [project.optional-dependencies]
