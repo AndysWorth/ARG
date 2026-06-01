@@ -228,6 +228,8 @@ __marimo__/
 
 # --- ARG runtime data (never commit index data or logs) ---
 arg_db/
+index_db/
+reports/
 *.pkl                          # BM25 index
 cluster_cache.json
 config_hash.json
