@@ -2,12 +2,12 @@
 
 Findings from live log analysis and hardware analysis of a 1500+ document corpus
 run on Apple M1 Max (10-core CPU, 32-core GPU, 16-core Neural Engine, 64GB RAM).
-To be converted into a feature doc once Feature 0003 is complete.
 
-**Not yet a feature.** Do not implement until Feature 0003 is merged and the
-`pdf-extraction-efficiency` plan has been converted and implemented first
-(that plan's items are easier and reduce the extraction problem before adding
-concurrency to it).
+**Ready to plan as Feature 0005, after Feature 0004 (`pdf-extraction-efficiency`)
+is implemented.** Feature 0003 merged 2026-06-01. Implement `pdf-extraction-efficiency`
+first — those items reduce the extraction problem before adding concurrency to it,
+and they establish the `embed_num_ctx` and `embed_batch_size` config fields that
+Item 1 of this plan depends on.
 
 ---
 
@@ -28,10 +28,18 @@ The log analysis showed:
 
 ---
 
+**Test infrastructure:** The unit suite now has 401 tests. New tests for this
+feature go in `tests/unit/test_pipeline.py` (Item 1) and `tests/unit/test_crawler.py`
+(Items 2–3). See `.claude/rules/testing.md` — `test_invariants.py` and
+`test_concurrency.py` are off-limits; `.claude/rules/concurrency.md` documents the
+threading model to follow when adding the extraction pool (Item 3).
+
+---
+
 ## Item 1: Fix `embed_batch` to use Ollama's native batch input
 
 **File:** `arg/pipeline.py`
-**Where:** `_OllamaEmbedderAdapter.embed_batch()`, currently ~line 291.
+**Where:** `_OllamaEmbedderAdapter.embed_batch()`, currently ~line 295.
 
 **Current code:**
 ```python
@@ -79,9 +87,9 @@ embed_batch_size: int = 64   # chunks per Ollama embed call
 ```
 Add `"EMBED_BATCH_SIZE": ("embed_batch_size", int)` to env-var map.
 
-**Repurpose `pdf_batch_size`:** `pdf_batch_size: int = 10` has been dead config
-since it was added. Remove it and its env-var entry `PDF_BATCH_SIZE` to avoid
-confusion. Replace with `embed_batch_size` above.
+**Repurpose `pdf_batch_size`:** `pdf_batch_size: int = 10` (line 107 in `config.py`)
+is still dead config — never read anywhere. Remove it and its env-var entry
+`PDF_BATCH_SIZE` when adding `embed_batch_size`.
 
 **Expected impact:** For a 2275-chunk PDF, reduces embed phase from 182s to
 ~36 calls at ~80ms each = ~3s (rough estimate; actual Neural Engine batch

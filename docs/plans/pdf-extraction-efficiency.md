@@ -1,10 +1,10 @@
 # Plan: PDF extraction efficiency
 
 Findings from live log analysis of a 1500+ document corpus run on 2026-05-28/29.
-To be converted into a feature doc once Feature 0003 is complete.
 
-**Not yet a feature.** Do not implement until Feature 0003 is merged and the
-feature numbering is confirmed.
+**Ready to implement as Feature 0004.** Feature 0003 merged 2026-06-01.
+Implement `parallel-extraction-pipeline` items after this plan (see that plan's
+ordering note). All items below are independent of each other unless noted.
 
 ---
 
@@ -31,8 +31,13 @@ Additionally, **288 spurious WARNING-level lines** per run from `pdfminer` and
 `pdfplumber` internals (FontBBox, color components, inline images) clutter the
 log and obscure real issues.
 
-**Note:** The double `pdfplumber.open()` bug is already fixed by Feature 0003
-item 2.2 (single-pass extraction). The items below are independent of that fix.
+**Note:** The double `pdfplumber.open()` bug is fixed by Feature 0003 (single-pass
+extraction, merged 2026-06-01). The items below are independent of that fix.
+
+**Test infrastructure:** The unit suite now has 401 tests. New tests for this
+feature go in `tests/unit/test_extractors.py`. See `.claude/rules/testing.md`
+for test discipline rules — notably, `test_invariants.py` and `test_concurrency.py`
+are off-limits for modification.
 
 ---
 
@@ -228,7 +233,7 @@ don't assert on pdfminer/pdfplumber log output).
 
 **File:** `arg/pipeline.py`
 **Where:** `_default_embedder()`, the `embed()` method of
-`_OllamaEmbedderAdapter`, currently passes `options={"num_ctx": 8192}`.
+`_OllamaEmbedderAdapter`, line ~283 — currently passes `options={"num_ctx": 8192}`.
 
 **Problem:** `nomic-embed-text` has a 2048-token context window. Telling Ollama
 `num_ctx: 8192` causes it to allocate a KV cache 4× larger than needed for every
