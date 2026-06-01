@@ -109,6 +109,10 @@ class ARGConfig:
 
     # --- Embedder ---------------------------------------------------------
     embed_num_ctx: int = 2048  # nomic-embed-text context window; keeps KV cache minimal
+    embed_batch_size: int = 64  # chunks per Ollama embed call
+
+    # --- Crawler ----------------------------------------------------------
+    extraction_workers: int = 1  # 1 = serial (default); 4-6 recommended on M1 Max
 
     # --- Logging ----------------------------------------------------------
     debug_tracing: bool = False
@@ -287,6 +291,9 @@ class ARGConfig:
             "PDF_EXTRACT_TIMEOUT": ("pdf_extract_timeout_seconds", int),
             # Embedder
             "EMBED_NUM_CTX": ("embed_num_ctx", int),
+            "EMBED_BATCH_SIZE": ("embed_batch_size", int),
+            # Crawler (also extraction_workers)
+            "EXTRACTION_WORKERS": ("extraction_workers", int),
             # Logging
             "DEBUG_TRACING": ("debug_tracing", _parse_bool),
             "ARG_DEBUG": ("debug_tracing", _parse_bool),

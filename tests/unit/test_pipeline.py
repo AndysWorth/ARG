@@ -493,3 +493,75 @@ def test_cluster_eventually_populated(config):
         assert clusters
     finally:
         pipeline.close()
+
+
+# ---------------------------------------------------------------------------
+# embed_batch batching tests (Feature 0005)
+# ---------------------------------------------------------------------------
+
+
+def _make_embedder_under_test(config: ARGConfig):
+    """Return an _OllamaEmbedderAdapter with a mocked ollama.Client.
+
+    The mock client's embed() returns fake embeddings so no real Ollama
+    connection is needed.
+    """
+    from unittest.mock import MagicMock, patch
+
+    dim = 768
+    mock_client = MagicMock()
+
+    def _fake_embed(**kwargs):
+        n = len(kwargs.get("input", ["x"]))
+        return MagicMock(embeddings=[[0.1] * dim for _ in range(n)])
+
+    mock_client.embed.side_effect = _fake_embed
+
+    pipeline = ARGPipeline(
+        config=config,
+        corpus_name="default",
+        llm=_ScriptedLLM(),
+        embedder=_TagEmbedder(),
+        skip_health_check=True,
+        skip_signal_handlers=True,
+    )
+
+    with (
+        patch("ollama.Client", return_value=mock_client),
+        patch("tiktoken.get_encoding", return_value=MagicMock(encode=lambda t: [1, 2, 3])),
+    ):
+        embedder = pipeline._default_embedder()
+
+    return embedder, mock_client
+
+
+def test_embed_batch_empty_returns_empty(config):
+    """embed_batch([]) must return [] without calling Ollama."""
+    embedder, mock_client = _make_embedder_under_test(config)
+    result = embedder.embed_batch([])
+    assert result == []
+    mock_client.embed.assert_not_called()
+
+
+def test_embed_batch_single_text_uses_list_input(config):
+    """embed_batch with 1 text must call _client.embed with input=[text], not a bare string."""
+    embedder, mock_client = _make_embedder_under_test(config)
+    embedder.embed_batch(["hello world"])
+    assert mock_client.embed.call_count == 1
+    call_kwargs = mock_client.embed.call_args.kwargs
+    assert isinstance(call_kwargs["input"], list), "input must be a list, not a bare string"
+    assert call_kwargs["input"] == ["hello world"]
+
+
+def test_embed_batch_sub_batches_by_embed_batch_size(config):
+    """100 texts with embed_batch_size=64 must produce exactly 2 calls to _client.embed."""
+    small_batch_config = ARGConfig(
+        docs_root=config.docs_root,
+        db_path=config.db_path,
+        embed_batch_size=64,
+    )
+    embedder, mock_client = _make_embedder_under_test(small_batch_config)
+    texts = [f"text_{i}" for i in range(100)]
+    results = embedder.embed_batch(texts)
+    assert mock_client.embed.call_count == 2  # ceil(100/64) = 2
+    assert len(results) == 100

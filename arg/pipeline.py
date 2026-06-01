@@ -293,7 +293,20 @@ class ARGPipeline:
                         limit //= 2
 
             def embed_batch(self_inner, texts: list[str]) -> list[list[float]]:
-                return [self_inner.embed(t) for t in texts]
+                if not texts:
+                    return []
+                batch_size = self.config.embed_batch_size
+                results: list[list[float]] = []
+                for start in range(0, len(texts), batch_size):
+                    sub = texts[start : start + batch_size]
+                    resp = _client.embed(
+                        model=_model,
+                        input=sub,
+                        truncate=True,
+                        options={"num_ctx": self.config.embed_num_ctx},
+                    )
+                    results.extend(list(e) for e in resp.embeddings)
+                return results
 
         return _OllamaEmbedderAdapter()
 
