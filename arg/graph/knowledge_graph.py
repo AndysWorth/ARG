@@ -203,17 +203,17 @@ class KnowledgeGraph:
         self._recompute_chunk_count(doc_id)
 
     def add_link(self, source_doc_id: str, target_doc_id: str, anchor_text: str) -> None:
-        """Insert a LINKS_TO edge from ``source`` to ``target``.
+        """Insert or update a LINKS_TO edge from ``source`` to ``target``.
 
-        Multiple distinct LINKS_TO edges between the same two documents are
-        allowed — the same source page can link to the same target with
-        different anchor text in different sections, and we want each
-        occurrence in the link graph.
+        MERGE semantics prevent duplicate edges from accumulating across
+        re-indexes: only one edge per (source, target) pair is kept.
         """
         self._conn.execute(
             (
                 "MATCH (s:Document {doc_id: $src}), (t:Document {doc_id: $tgt}) "
-                "CREATE (s)-[:LINKS_TO {anchor_text: $anchor}]->(t)"
+                "MERGE (s)-[r:LINKS_TO]->(t) "
+                "ON CREATE SET r.anchor_text = $anchor "
+                "ON MATCH SET r.anchor_text = $anchor"
             ),
             {"src": source_doc_id, "tgt": target_doc_id, "anchor": anchor_text or ""},
         )
@@ -317,17 +317,17 @@ class KnowledgeGraph:
     def list_all_documents(self, limit: int = 0, offset: int = 0) -> list[dict[str, Any]]:
         """All Document nodes, sorted by doc_id.
 
-        ``limit=0`` means no limit (return all).  ``offset`` is only applied
-        when ``limit > 0``.
+        ``limit=0`` means no limit (return all).  ``offset`` is applied
+        independently of ``limit`` so callers can page without a hard cap.
         """
         query = (
             "MATCH (d:Document) "
             "RETURN d.doc_id, d.title, d.file_type, d.chunk_count "
             "ORDER BY d.doc_id"
         )
+        if offset > 0:
+            query += f" SKIP {int(offset)}"
         if limit > 0:
-            if offset > 0:
-                query += f" SKIP {int(offset)}"
             query += f" LIMIT {int(limit)}"
         result = self._conn.execute(query)
         return [
@@ -338,6 +338,24 @@ class KnowledgeGraph:
                 "chunk_count": row[3],
             }
             for row in _iter_rows(result)
+        ]
+
+    def list_documents_by_chunk_count(
+        self, limit: int = 0, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """Documents ordered by chunk_count DESC with server-side pagination."""
+        query = (
+            "MATCH (d:Document) "
+            "RETURN d.doc_id, d.title, d.chunk_count "
+            "ORDER BY d.chunk_count DESC, d.doc_id ASC"
+        )
+        if offset > 0:
+            query += f" SKIP {int(offset)}"
+        if limit > 0:
+            query += f" LIMIT {int(limit)}"
+        result = self._conn.execute(query)
+        return [
+            {"doc_id": row[0], "title": row[1], "chunk_count": row[2]} for row in _iter_rows(result)
         ]
 
     def count_documents(self) -> int:

@@ -383,3 +383,62 @@ def test_context_manager_closes_cleanly(tmp_path):
     # Re-open after context-manager close.
     with KnowledgeGraph(db_path) as kg2:
         assert kg2.stats()["documents"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Feature 0003 — graph correctness
+# ---------------------------------------------------------------------------
+
+
+def test_add_link_idempotent(kg, docs_dir):
+    """Same (src, tgt, anchor) twice → get_linked_docs returns target once."""
+    a, b, _ = _build_chain(kg, docs_dir, ["a.html", "b.html", "c.html"])
+    # a->b was already created by _build_chain; add again with same anchor.
+    kg.add_link(a, b, "")
+    result = kg.get_linked_docs(a, depth=1)
+    assert result.count(b) == 1
+
+
+def test_add_link_distinct_anchors(kg, docs_dir):
+    """Two calls with different anchors → single edge; target returned once."""
+    a, b = _build_chain(kg, docs_dir, ["a.html", "b.html"])[:2]
+    kg.add_link(a, b, "first anchor")
+    kg.add_link(a, b, "second anchor")
+    assert kg.stats()["link_edges"] == 1
+    result = kg.get_linked_docs(a, depth=1)
+    assert result.count(b) == 1
+
+
+def test_list_all_documents_offset_without_limit(kg, docs_dir):
+    """offset is applied even when limit=0 (no limit)."""
+    _build_chain(kg, docs_dir, ["a.html", "b.html", "c.html", "d.html"])
+    all_docs = kg.list_all_documents()
+    assert len(all_docs) == 4
+    paged = kg.list_all_documents(limit=0, offset=2)
+    assert len(paged) == 2
+    assert paged == all_docs[2:]
+
+
+def test_list_documents_by_chunk_count_pagination(kg, docs_dir):
+    """5 docs with varying chunk counts → correct 3-item page in descending order."""
+    names = ["a.html", "b.html", "c.html", "d.html", "e.html"]
+    chunk_counts = [1, 5, 3, 0, 7]
+    for name, count in zip(names, chunk_counts, strict=True):
+        p = docs_dir / name
+        p.touch()
+        kg.add_document(_doc(p))
+        doc_id = str(p.resolve())
+        for i in range(count):
+            kg.add_chunk(Chunk(f"{name}::chunk::{i}", "t", 1), doc_id, i)
+
+    # First page: top 3 by chunk_count desc → counts 7, 5, 3.
+    page1 = kg.list_documents_by_chunk_count(limit=3, offset=0)
+    assert len(page1) == 3
+    counts_page1 = [d["chunk_count"] for d in page1]
+    assert counts_page1 == sorted(counts_page1, reverse=True)
+    assert counts_page1 == [7, 5, 3]
+
+    # Second page: remaining 2 docs → counts 1, 0.
+    page2 = kg.list_documents_by_chunk_count(limit=3, offset=3)
+    assert len(page2) == 2
+    assert [d["chunk_count"] for d in page2] == [1, 0]

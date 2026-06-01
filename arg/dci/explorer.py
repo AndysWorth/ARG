@@ -96,22 +96,25 @@ class CorpusExplorer:
     def docs_by_chunk_count(
         self, page: int = 1, page_size: int = 25, order: str = "desc"
     ) -> dict[str, Any]:
-        """Paginated chunk-count ranking; pagination lives at this layer."""
+        """Paginated chunk-count ranking; pagination pushed into Kuzu for desc order."""
         if page < 1:
             page = 1
         if page_size < 1:
             page_size = 25
-        ranked = self.kg.docs_by_chunk_count(descending=(order != "asc"))
-        total = len(ranked)
-        start = (page - 1) * page_size
-        end = start + page_size
+        total = self.kg.count_documents()
+        offset = (page - 1) * page_size
+        if order == "asc":
+            ranked = self.kg.docs_by_chunk_count(descending=False)
+            items = ranked[offset : offset + page_size]
+        else:
+            items = self.kg.list_documents_by_chunk_count(limit=page_size, offset=offset)
         return {
             "page": page,
             "page_size": page_size,
             "total": total,
             "total_pages": max(1, math.ceil(total / page_size)),
             "order": "asc" if order == "asc" else "desc",
-            "items": ranked[start:end],
+            "items": items,
         }
 
     # ------------------------------------------------------------------
