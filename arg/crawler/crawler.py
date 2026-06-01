@@ -153,6 +153,12 @@ def crawl(
     ``seen``, so link-graph edges to them are still recorded. Pass a
     filter built from ``--subset`` / ``--include`` CLI flags for partial
     re-index runs.
+
+    When ``config.extraction_workers > 1``, the dirwalk phase (PDFs and
+    text files unreachable from ``index.html``) is extracted in parallel
+    using a producer-consumer thread pool.  The BFS phase (HTML link
+    following) is always serial because each HTML file must be read to
+    discover the next path to visit.
     """
     docs_root = docs_root.resolve()
     if not docs_root.is_dir():
@@ -198,7 +204,9 @@ def crawl(
 
     logger.info("crawler: link phase complete (%d docs); scanning directory tree", extracted)
 
-    # Directory walk for files unreachable from index.html.
+    # Collect dirwalk paths (files unreachable from index.html).
+    # All are added to `seen` now so parallel extraction sees a consistent set.
+    dirwalk_paths: list[Path] = []
     for path in sorted(docs_root.rglob("*")):
         if not path.is_file():
             continue
@@ -213,18 +221,86 @@ def crawl(
         if path_filter is not None and not path_filter(resolved):
             continue
         seen.add(resolved)
-        doc = _extract_for_path(resolved, config)
+        dirwalk_paths.append(resolved)
+
+    workers = config.extraction_workers
+    if workers > 1:
+        for doc in _parallel_dirwalk(dirwalk_paths, workers, config, docs_root, seen, queue):
+            extracted += 1
+            yield doc
+    else:
+        for resolved in dirwalk_paths:
+            doc = _extract_for_path(resolved, config)
+            if doc is None:
+                continue
+            extracted += 1
+            if extracted % _PROGRESS_EVERY == 0:
+                logger.info("crawler: %d files extracted so far (dirwalk phase)", extracted)
+            doc.metadata["links_to"] = _resolve_links(
+                doc.metadata.get("links_to", []), resolved, docs_root, seen, queue
+            )
+            yield doc
+
+    logger.info("crawler: complete (%d total documents extracted)", extracted)
+
+
+def _parallel_dirwalk(
+    paths: list[Path],
+    workers: int,
+    config: ARGConfig,
+    docs_root: Path,
+    seen: set[Path],
+    bfs_queue: deque[Path],
+) -> Iterator[Document]:
+    """Extract ``paths`` using a thread pool and yield Documents as they complete.
+
+    Uses a bounded queue (``maxsize=workers*2``) for backpressure: the
+    producer thread blocks when the consumer (caller) falls behind,
+    preventing unbounded memory growth from many large in-flight Documents.
+
+    ``ThreadPoolExecutor`` (not Process) because pdfplumber and pymupdf
+    release the GIL during I/O and rendering, so threads give true
+    parallelism on multi-core hardware without pickling overhead.
+
+    Error handling is delegated to ``_extract_for_path`` which catches all
+    extractor exceptions internally and returns ``None``; the pool never
+    sees an exception from a worker.
+    """
+    import queue as _queue
+    import threading
+    from concurrent.futures import as_completed
+
+    if not paths:
+        return
+
+    doc_queue: _queue.Queue[Document | None] = _queue.Queue(maxsize=workers * 2)
+
+    def _producer() -> None:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {pool.submit(_extract_for_path, p, config): p for p in paths}
+            for fut in as_completed(futs):
+                doc = fut.result()  # _extract_for_path never raises
+                if doc is not None:
+                    doc_queue.put(doc)  # blocks when queue full (backpressure)
+        doc_queue.put(None)  # sentinel: no more documents
+
+    producer = threading.Thread(target=_producer, daemon=True)
+    producer.start()
+
+    while True:
+        doc = doc_queue.get()
         if doc is None:
-            continue
-        extracted += 1
-        if extracted % _PROGRESS_EVERY == 0:
-            logger.info("crawler: %d files extracted so far (dirwalk phase)", extracted)
+            break
         doc.metadata["links_to"] = _resolve_links(
-            doc.metadata.get("links_to", []), resolved, docs_root, seen, queue
+            doc.metadata.get("links_to", []),
+            doc.path,
+            docs_root,
+            seen,
+            bfs_queue,
         )
         yield doc
 
-    logger.info("crawler: complete (%d total documents extracted)", extracted)
+    producer.join()
 
 
 def _extract_for_path(path: Path, config: ARGConfig) -> Document | None:

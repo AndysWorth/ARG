@@ -404,3 +404,64 @@ def test_pdf_extraction_timeout_zero_disables_timeout(docs_root, tmp_path):
 
     mock_fn.assert_called_once_with(pdf_path, no_timeout_config)
     assert result is sentinel
+
+
+# ---------------------------------------------------------------------------
+# Parallel extraction tests (Feature 0005)
+# ---------------------------------------------------------------------------
+
+
+def test_extraction_workers_default_is_serial(docs_root, tmp_path):
+    """extraction_workers=1 (default) produces the same documents as the legacy serial path."""
+    write(docs_root / "index.html", html_with_links("a.html", body="index"))
+    write(docs_root / "a.html", "<html><body><h1>A</h1><p>content</p></body></html>")
+    write(docs_root / "b.txt", "plain text file")
+
+    serial_config = ARGConfig(docs_root=docs_root, db_path=tmp_path / "db1", extraction_workers=1)
+    docs_serial = list(crawl(docs_root, serial_config))
+
+    assert _paths(docs_serial) == {"index.html", "a.html", "b.txt"}
+
+
+def test_parallel_crawl_produces_same_doc_set_as_serial(docs_root, tmp_path):
+    """extraction_workers=4 must yield the same set of doc paths as extraction_workers=1."""
+    write(docs_root / "index.html", html_with_links("a.html", body="index"))
+    write(docs_root / "a.html", "<html><body><h1>A</h1><p>auth</p></body></html>")
+    write(docs_root / "b.txt", "rate limits plain text")
+    write(docs_root / "c.txt", "error codes plain text")
+    write(docs_root / "d.txt", "webhook guide plain text")
+
+    serial_config = ARGConfig(
+        docs_root=docs_root, db_path=tmp_path / "db_serial", extraction_workers=1
+    )
+    parallel_config = ARGConfig(
+        docs_root=docs_root, db_path=tmp_path / "db_parallel", extraction_workers=4
+    )
+
+    serial_paths = _paths(crawl(docs_root, serial_config))
+    parallel_paths = _paths(crawl(docs_root, parallel_config))
+
+    assert parallel_paths == serial_paths
+
+
+def test_parallel_dirwalk_bounded_queue_no_deadlock(docs_root, tmp_path):
+    """_parallel_dirwalk with more paths than maxsize must complete without deadlock.
+
+    With workers=2 (maxsize=4) and 10 paths, the producer would stall if the
+    bounded queue deadlocked; completing successfully proves the flow is correct.
+    """
+    from collections import deque
+
+    from arg.crawler.crawler import _parallel_dirwalk
+
+    for i in range(10):
+        write(docs_root / f"doc_{i}.txt", f"content {i}")
+
+    cfg = ARGConfig(docs_root=docs_root, db_path=tmp_path / "db", extraction_workers=2)
+    paths = sorted(docs_root.glob("*.txt"))
+    seen: set[Path] = set(paths)
+    bfs_q: deque = deque()
+
+    docs = list(_parallel_dirwalk(paths, 2, cfg, docs_root, seen, bfs_q))
+    assert len(docs) == 10
+    assert all(d.path.name.startswith("doc_") for d in docs)
