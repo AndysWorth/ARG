@@ -411,7 +411,7 @@ def test_cluster_cache_used_when_present(config, kg, tmp_path):
 
 def test_find_document_returns_ranked_doc_ids(config, kg):
     retriever = _build_retriever(config, kg)
-    ranked = retriever._find_document("QUERY_A authentication", top_k=3)
+    ranked = retriever.find_document("QUERY_A authentication", top_k=3)
     assert ranked
     # Top hit must be alpha (its chunks contain QUERY_A and "authentication").
     alpha_id = str((config.docs_root / "alpha.html").resolve())
@@ -419,3 +419,64 @@ def test_find_document_returns_ranked_doc_ids(config, kg):
     # Scores monotonically non-increasing.
     scores = [s for _, s in ranked]
     assert scores == sorted(scores, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Feature 0003 — retriever correctness
+# ---------------------------------------------------------------------------
+
+
+def test_combine_where_flat_and():
+    """Two $and clauses → single flat $and (no nesting)."""
+    from arg.retriever.retriever import _combine_where
+
+    a = {"$and": [{"file_type": "pdf"}, {"has_table": True}]}
+    b = {"$and": [{"doc_id": {"$in": ["x", "y"]}}]}
+    result = _combine_where(a, b)
+    assert result is not None
+    assert list(result.keys()) == ["$and"]
+    assert len(result["$and"]) == 3
+    # Must not be nested.
+    for clause in result["$and"]:
+        assert "$and" not in clause
+
+
+def test_combine_where_mixed():
+    """One $and + one plain filter → flat $and."""
+    from arg.retriever.retriever import _combine_where
+
+    a = {"$and": [{"file_type": "html"}]}
+    b = {"doc_id": "abc"}
+    result = _combine_where(a, b)
+    assert result is not None
+    assert list(result.keys()) == ["$and"]
+    assert len(result["$and"]) == 2
+    assert {"doc_id": "abc"} in result["$and"]
+    assert {"file_type": "html"} in result["$and"]
+
+
+def test_retrieve_with_filters_and_candidate_ids(config, kg):
+    """Passing both filters and candidate_doc_ids must not raise a ChromaDB error."""
+    retriever = _build_retriever(config, kg)
+    alpha_id = str((config.docs_root / "alpha.html").resolve())
+    epsilon_id = str((config.docs_root / "epsilon.pdf").resolve())
+    # Inject a fake cluster cache so Stage 0.3 adds candidate_doc_ids.
+    import json
+
+    cluster_path = config.cluster_cache_path("default")
+    cluster_path.parent.mkdir(parents=True, exist_ok=True)
+    cluster_path.write_text(
+        json.dumps(
+            {
+                "doc_to_cluster": {alpha_id: "c0", epsilon_id: "c0"},
+                "cluster_members": {"c0": [alpha_id, epsilon_id]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    config.min_cluster_docs = 1
+    # Both filters AND candidate_doc_ids active — _combine_where must flatten.
+    results = retriever.retrieve(
+        "QUERY_A authentication", enrich=True, filters={"file_type": "html"}
+    )
+    assert isinstance(results, list)

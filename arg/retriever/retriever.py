@@ -191,7 +191,7 @@ class HybridRetriever:
     def _stage0_enrichment(self, query: str) -> set[str] | None:
         """Return a candidate doc-id set, or ``None`` to mean "use full corpus"."""
         # 0.1 doc-level BM25 search.
-        ranked = self._find_document(query, top_k=self.config.enrich_top_docs)
+        ranked = self.find_document(query, top_k=self.config.enrich_top_docs)
         if not ranked:
             return None
         # Apply threshold; if none clear it, skip enrichment.
@@ -220,7 +220,7 @@ class HybridRetriever:
                     candidates.update(members)
         return candidates
 
-    def _find_document(self, query: str, *, top_k: int) -> list[tuple[str, float]]:
+    def find_document(self, query: str, *, top_k: int) -> list[tuple[str, float]]:
         """Find top ``top_k`` documents by BM25 score aggregated from chunk hits.
 
         Queries the BM25 index, groups chunk scores by doc_id using max
@@ -548,12 +548,19 @@ def _combine_where(a: dict[str, Any] | None, b: dict[str, Any] | None) -> dict[s
 
     Chroma supports ``$and`` for multi-clause filters; when only one side
     is non-empty we return that side directly to keep simple queries readable.
+    Existing ``$and`` clauses are flattened so the result is never nested.
     """
     if not a:
         return b or None
     if not b:
         return a or None
-    return {"$and": [a, b]}
+    clauses: list[dict[str, Any]] = []
+    for part in (a, b):
+        if list(part.keys()) == ["$and"]:
+            clauses.extend(part["$and"])
+        else:
+            clauses.append(part)
+    return {"$and": clauses}
 
 
 def _meta_matches(meta: dict[str, Any], filters: dict[str, Any] | None) -> bool:

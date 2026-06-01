@@ -261,7 +261,7 @@ class CorpusAnalyst:
         enrichment and by :class:`CorpusExplorer.corpus_search` (Section 10).
         Not exposed on the pipeline's public API.
         """
-        ranked = self.retriever._find_document(query, top_k=top_k)
+        ranked = self.retriever.find_document(query, top_k=top_k)
         if not ranked:
             return []
         meta_map: dict[str, str] = {}
