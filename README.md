@@ -174,6 +174,39 @@ Logs are written to `{db}/{corpus}/arg.log` in JSON format. Key messages to watc
 
 Stream logs live with `tail -f {db}/default/arg.log`. Add `--debug` to the serve command for verbose tracing.
 
+## Indexing Report
+
+After indexing, generate a pair of self-contained HTML analysis reports from the log files:
+
+```bash
+python scripts/index_report.py
+```
+
+By default this reads `./index_db/default/` and writes to `./reports/`. Both paths are configurable:
+
+```bash
+python scripts/index_report.py --db ./index_db --corpus default --out ./reports
+
+# Open the main report in your browser when done
+python scripts/index_report.py --open
+```
+
+Two files are produced:
+
+| File | Contents |
+|---|---|
+| `reports/indexing_report.html` | Performance metrics, error breakdown, extraction quality, cluster summary, and prioritised improvement recommendations |
+| `reports/indexing_appendix.html` | Full raw-data tables: every encrypted PDF skipped, every 0-chunk document, every AcroForm warning, slowest 50 documents, all indexing gaps, hourly throughput |
+
+The report covers:
+- **Performance** — wall time vs. CPU time, per-document latency percentiles (p50/p95/p99), slowest documents, OCR usage
+- **Errors & warnings** — distinction between benign library noise (pdfminer font warnings) and real application warnings (encrypted PDFs, dangling links, AcroForm partial extraction)
+- **Extraction quality** — documents that produced 0 chunks (unreachable in retrieval), 1-chunk documents, very large documents that dominate the index
+- **Clusters** — LLM-generated topic labels and document counts
+- **Index artifacts** — ChromaDB embedding counts, Kuzu graph node/edge counts, BM25 corpus size
+
+The `reports/` directory is git-ignored; reports are re-generated on demand from the live log files.
+
 ## Known Limitations
 
 - **Only four file types are indexed** — `.pdf`, `.html`/`.htm`, `.txt`, and `.md`.
