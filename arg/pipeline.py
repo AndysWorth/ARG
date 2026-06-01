@@ -98,6 +98,8 @@ class ARGPipeline:
         self._closed = False
         self._bm25_rebuild_lock = threading.Lock()
         self._bm25_rebuild_timer: threading.Timer | None = None
+        self._cluster_lock = threading.Lock()
+        self._cluster_thread: threading.Thread | None = None
 
         # ------- Pre-flight ----------------------------------------------------
         if not skip_health_check:
@@ -356,8 +358,7 @@ class ARGPipeline:
             )
             self.retriever.reload()
             self._write_schema_hash()
-            logger.info("pipeline.index: computing topic clusters")
-            self.explorer.get_topic_clusters()
+            self._recompute_clusters_bg()
             return {
                 "documents_indexed": stats.documents_indexed,
                 "documents_skipped": stats.documents_skipped,
@@ -373,7 +374,7 @@ class ARGPipeline:
                 return 0
             n = self.indexer.add_document(doc)
             self.retriever.reload()
-            self._recompute_clusters()
+            self._recompute_clusters_bg()
             self._invalidate_summary(doc.path.resolve())
             return n
 
@@ -381,7 +382,7 @@ class ARGPipeline:
         with self._lock:
             self.indexer.remove_document(doc_id)
             self.retriever.reload()
-            self._recompute_clusters()
+            self._recompute_clusters_bg()
             self._invalidate_summary(Path(doc_id))
 
     def update_document(self, path: Path) -> int:
@@ -391,18 +392,33 @@ class ARGPipeline:
                 return 0
             n = self.indexer.update_document(doc)
             self.retriever.reload()
-            self._recompute_clusters()
+            self._recompute_clusters_bg()
             self._invalidate_summary(doc.path.resolve())
             return n
 
-    def _recompute_clusters(self) -> None:
-        """Invalidate the cluster cache and immediately recompute it.
+    def _recompute_clusters_bg(self) -> None:
+        """Dispatch cluster recompute to a daemon background thread.
 
-        Incremental labeling in _compute_clusters reuses labels for clusters
-        whose membership is unchanged, so only affected clusters pay an LLM call.
+        Skips dispatch if a thread is already in flight — the running thread
+        will call invalidate_cluster_cache() before computing, so it will see
+        the latest data regardless of when it was enqueued.
         """
-        self.explorer.invalidate_cluster_cache()
-        self.explorer.get_topic_clusters()
+        with self._cluster_lock:
+            if self._cluster_thread is not None and self._cluster_thread.is_alive():
+                return
+            t = threading.Thread(target=self._run_cluster_recompute, daemon=True)
+            self._cluster_thread = t
+            t.start()
+
+    def _run_cluster_recompute(self) -> None:
+        """Called on the background cluster thread."""
+        if self._closed:
+            return
+        try:
+            self.explorer.invalidate_cluster_cache()
+            self.explorer.get_topic_clusters()
+        except Exception:
+            logger.exception("Error in background cluster recompute")
 
     def _schedule_bm25_rebuild(self) -> None:
         """Debounce BM25 rebuild: 5 s after the last watcher event fires."""
@@ -521,6 +537,11 @@ class ARGPipeline:
             if self._bm25_rebuild_timer is not None:
                 self._bm25_rebuild_timer.cancel()
                 self._bm25_rebuild_timer = None
+        # Wait for any in-flight cluster thread so callers see a clean state.
+        with self._cluster_lock:
+            t = self._cluster_thread
+        if t is not None:
+            t.join(timeout=5.0)
         with self._lock:
             if self.watcher is not None:
                 try:
@@ -592,14 +613,14 @@ class ARGPipeline:
             # Skip per-file BM25 rebuild; the deferred rebuild below batches
             # all rapid watcher events into a single O(corpus) rebuild.
             self.indexer.update_document(doc, skip_bm25_write=True)
-            self.explorer.invalidate_cluster_cache()
             self._invalidate_summary(doc.path.resolve())
+        self._recompute_clusters_bg()
         self._schedule_bm25_rebuild()
 
     def _watcher_remove_document(self, doc_id: str) -> None:
         """Like remove_document but debounces the BM25 rebuild."""
         with self._lock:
             self.indexer.remove_document(doc_id, skip_bm25_write=True)
-            self._recompute_clusters()
             self._invalidate_summary(Path(doc_id))
+        self._recompute_clusters_bg()
         self._schedule_bm25_rebuild()

@@ -205,25 +205,45 @@ class CorpusExplorer:
                 "labels": {"all": "All documents"},
             }
 
-        # Pull embeddings for every document. ChromaDB returns embeddings
-        # as a numpy ndarray, so we avoid ``rows.get(...) or []`` (that
-        # short-circuit triggers numpy's truthiness ambiguity).
-        rows = self._docs_coll.get(ids=doc_ids, include=["embeddings", "metadatas"])
-        embeddings_obj = rows.get("embeddings")
-        ids = list(rows.get("ids") or [])
-        metas = list(rows.get("metadatas") or [])
-        if embeddings_obj is None or len(embeddings_obj) == 0 or len(embeddings_obj) != len(ids):
+        # Fetch embeddings in batches of 2000 to bound peak memory pressure.
+        # Each batch is freed after np.vstack so only one batch + the growing
+        # matrix are live at the same time.
+        # TODO: add PCA pre-step (pca_dims=64) for corpora >50k docs.
+        import numpy as np
+
+        _BATCH = 2000
+        ids: list[str] = []
+        metas: list[Any] = []
+        embedding_batches: list[Any] = []
+        for batch_start in range(0, len(doc_ids), _BATCH):
+            batch_ids = doc_ids[batch_start : batch_start + _BATCH]
+            rows = self._docs_coll.get(ids=batch_ids, include=["embeddings", "metadatas"])
+            batch_emb = rows.get("embeddings")
+            batch_ids_returned = list(rows.get("ids") or [])
+            batch_metas = list(rows.get("metadatas") or [])
+            if batch_emb is None or len(batch_emb) == 0:
+                continue
+            ids.extend(batch_ids_returned)
+            metas.extend(batch_metas)
+            embedding_batches.append(np.asarray(batch_emb, dtype=float))
+
+        if not embedding_batches or len(embedding_batches[0]) == 0:
             logger.warning("Cluster compute aborted: documents collection has no embeddings")
             return {
                 "doc_to_cluster": dict.fromkeys(doc_ids, "all"),
                 "cluster_members": {"all": list(doc_ids)},
                 "labels": {"all": "All documents"},
             }
-        # numpy array accepted directly by KMeans — avoids the list-of-lists
-        # conversion that would double peak memory for large embedding matrices.
-        import numpy as np
-
-        embeddings = np.asarray(embeddings_obj, dtype=float)
+        embeddings = (
+            np.vstack(embedding_batches) if len(embedding_batches) > 1 else embedding_batches[0]
+        )
+        if len(embeddings) != len(ids):
+            logger.warning("Cluster compute aborted: documents collection has no embeddings")
+            return {
+                "doc_to_cluster": dict.fromkeys(doc_ids, "all"),
+                "cluster_members": {"all": list(doc_ids)},
+                "labels": {"all": "All documents"},
+            }
 
         from sklearn.cluster import KMeans
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -212,10 +213,18 @@ class Generator:
         if not processed.embedding_queries:
             processed.embedding_queries = [processed.raw_query]
 
-        for q in processed.embedding_queries:
-            chunks = self.retriever.retrieve(
+        queries = processed.embedding_queries
+
+        def _retrieve_one(q: str) -> list[NodeWithScore]:
+            return self.retriever.retrieve(
                 q, enrich=enrich, scope_doc_id=scope_doc_id, filters=filters
             )
+
+        max_workers = min(len(queries), 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            all_results = list(pool.map(_retrieve_one, queries))
+
+        for chunks in all_results:
             for node_with_score in chunks:
                 cid = node_with_score.node.id_
                 if cid in seen_chunk_ids:

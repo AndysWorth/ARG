@@ -378,3 +378,66 @@ def test_docs_by_chunk_count_order(config, kg):
     desc_counts = [d["chunk_count"] for d in desc["items"]]
     assert asc_counts == sorted(asc_counts)
     assert desc_counts == sorted(desc_counts, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Feature 0003 — batched embedding fetch
+# ---------------------------------------------------------------------------
+
+
+def test_compute_clusters_batched_fetch(config, kg):
+    """_compute_clusters handles >2000 mock embedding rows without error."""
+    import numpy as np
+
+    n_docs = 2050
+    embedder = _ClusterEmbedder()
+    indexer = Indexer(config=config, knowledge_graph=kg, embedder=embedder)
+    # Build a small set of real docs but inject a mock Chroma collection that
+    # returns 2050 fake embedding rows so we exercise the batching code path.
+    real_docs = _clustered_corpus(config)
+    indexer.index(real_docs)
+
+    rng = np.random.default_rng(42)
+    fake_ids = [f"doc_{i}" for i in range(n_docs)]
+    fake_embeddings = rng.standard_normal((n_docs, _VEC_DIM)).tolist()
+    fake_metas = [{"title": f"Doc {i}"} for i in range(n_docs)]
+
+    class _FakeChromaCollection:
+        def get(self, ids, include):
+            result_ids, result_embeddings, result_metas = [], [], []
+            # Respect the ids parameter (batched calls)
+            id_set = set(ids) if ids else set(fake_ids)
+            for fid, femb, fmeta in zip(fake_ids, fake_embeddings, fake_metas, strict=True):
+                if fid in id_set:
+                    result_ids.append(fid)
+                    result_embeddings.append(femb)
+                    result_metas.append(fmeta)
+            return {"ids": result_ids, "embeddings": result_embeddings, "metadatas": result_metas}
+
+    llm = _ScriptedLLM(default="BatchCluster")
+    analyst = None  # not needed for _compute_clusters
+    explorer = CorpusExplorer(
+        config=config,
+        knowledge_graph=kg,
+        analyst=analyst,  # type: ignore[arg-type]
+        llm=llm,
+        chroma_documents_collection=_FakeChromaCollection(),
+    )
+    # Inject fake doc_ids into the graph so list_all_documents() returns them.
+    from arg.crawler.extractors import Document
+
+    for fid in fake_ids:
+        from pathlib import Path as _Path
+
+        doc = Document(
+            path=_Path(fid),
+            content="",
+            metadata={"title": fid, "file_type": "html"},
+        )
+        kg.add_document(doc)
+
+    result = explorer._compute_clusters()
+    assert isinstance(result, dict)
+    assert "doc_to_cluster" in result
+    assert "cluster_members" in result
+    assert len(result["doc_to_cluster"]) > 0

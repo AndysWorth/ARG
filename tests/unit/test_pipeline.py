@@ -334,23 +334,35 @@ def test_reindex_is_idempotent(config):
 
 
 def test_index_recomputes_cluster_cache(config):
+    import time
+
     _write_corpus(config.docs_root)
     pipeline = _build_pipeline(config)
     try:
         pipeline.index()
-        # index() now eagerly computes and caches clusters.
+        # Cluster computation is async; close() joins the thread.
+        pipeline.close()
+
         cache_path = config.cluster_cache_path("default")
         assert cache_path.is_file()
         # Overwrite with a stale sentinel.
         cache_path.write_text(
             json.dumps({"doc_to_cluster": {}, "cluster_members": {}, "labels": {}})
         )
-        # Re-index → stale cache is replaced with a freshly computed one.
+
+        pipeline = _build_pipeline(config)
+        # Re-index → background thread replaces stale cache with a fresh one.
         pipeline.index()
-        assert cache_path.is_file()
-        data = json.loads(cache_path.read_text())
-        # Fresh cache should have actual cluster data, not the empty sentinel.
-        assert data != {"doc_to_cluster": {}, "cluster_members": {}, "labels": {}}
+        # Poll until the background thread writes the fresh cache (3 s budget).
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if cache_path.is_file():
+                data = json.loads(cache_path.read_text())
+                if data != {"doc_to_cluster": {}, "cluster_members": {}, "labels": {}}:
+                    break
+            time.sleep(0.02)
+        else:
+            pytest.fail("Cluster cache not refreshed within 3 s")
     finally:
         pipeline.close()
 
@@ -424,3 +436,60 @@ def test_context_manager(config):
         result = pipeline.query("QUERY_A authentication", enrich=False)
         assert result.sources
     # After __exit__, the graph is closed.
+
+
+# ---------------------------------------------------------------------------
+# Feature 0003 — async cluster computation
+# ---------------------------------------------------------------------------
+
+
+def test_index_returns_before_cluster_completes(config):
+    """index() must return before the background cluster thread finishes."""
+    import threading
+    import time
+    from unittest.mock import patch
+
+    gate = threading.Event()
+    _write_corpus(config.docs_root)
+    pipeline = _build_pipeline(config)
+    original_compute = pipeline.explorer._compute_clusters
+
+    def _slow_compute():
+        gate.wait(timeout=10.0)
+        return original_compute()
+
+    try:
+        with patch.object(pipeline.explorer, "_compute_clusters", side_effect=_slow_compute):
+            start = time.monotonic()
+            pipeline.index()
+            elapsed = time.monotonic() - start
+            # index() must return before the gate is released (cluster still blocked).
+            assert elapsed < 1.0, f"index() took {elapsed:.2f}s — should be near-instant"
+    finally:
+        gate.set()  # unblock so close() can join cleanly
+        pipeline.close()
+
+
+def test_cluster_eventually_populated(config):
+    """Cluster cache is populated by the background thread within 3 s."""
+    import time
+
+    _write_corpus(config.docs_root)
+    pipeline = _build_pipeline(config)
+    try:
+        pipeline.index()
+        cache_path = config.cluster_cache_path("default")
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if cache_path.is_file():
+                data = json.loads(cache_path.read_text())
+                if data.get("cluster_members"):
+                    break
+            time.sleep(0.02)
+        else:
+            pytest.fail("Cluster cache not populated within 3 s")
+        clusters = pipeline.get_topic_clusters()
+        assert isinstance(clusters, list)
+        assert clusters
+    finally:
+        pipeline.close()

@@ -352,6 +352,43 @@ def test_stream_generate_yields_tokens_incrementally(config, kg):
     assert len(out) > 1, "streaming must yield more than one chunk"
 
 
+# ---------------------------------------------------------------------------
+# Feature 0003 — parallel sub-query embedding
+# ---------------------------------------------------------------------------
+
+
+def test_retrieve_union_parallel(config, kg):
+    """With 3 sub-queries, retriever.retrieve is called 3 times and results are unioned."""
+
+    from unittest.mock import patch
+
+    llm = _ScriptedLLM(
+        responses={
+            "Rewrite the following": "QUERY_A and QUERY_B together",
+            "Does the following question contain": (
+                '{"sub_questions": ["QUERY_A auth", "QUERY_B migrations", "QUERY_A oauth"]}'
+            ),
+        }
+    )
+    gen2, _, retriever2 = _build_generator(config, kg, llm=llm)
+
+    call_count2 = 0
+    original2 = retriever2.retrieve
+
+    def _counting2(q, **kwargs):
+        nonlocal call_count2
+        call_count2 += 1
+        return original2(q, **kwargs)
+
+    with patch.object(retriever2, "retrieve", side_effect=_counting2):
+        result = gen2.generate("QUERY_A auth and QUERY_B migrations")
+    # 3 sub-queries → retriever called 3 times
+    assert call_count2 == 3
+    # Results are deduped by chunk_id
+    chunk_ids = [s.chunk_id for s in result.sources]
+    assert len(chunk_ids) == len(set(chunk_ids))
+
+
 def test_stream_generate_empty_context_returns_fallback(config, kg):
     embedder = _TagEmbedder()
     indexer = Indexer(config=config, knowledge_graph=kg, embedder=embedder)

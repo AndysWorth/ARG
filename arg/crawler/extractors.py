@@ -909,76 +909,68 @@ def extract_pdf(path: Path, config: ARGConfig) -> Iterator[tuple[int, str, dict[
         sidecar = _read_pdf_sidecar(path)
         layout_analysis = bool(sidecar.get("pdf_layout_analysis", config.pdf_layout_analysis))
 
-        # Step 0e — running header/footer detection. We need every page's lines
-        # before we yield page 1, so we scan twice. For small docs this is
-        # negligible; for huge docs we could move this to a sampling pass.
-        all_pages_lines: list[list[tuple[float, str]]] = []
+        # Single-pass pdfplumber: buffer (lines, tables, nchars) for every page,
+        # run running-header detection on the full buffer, then process pages
+        # using the buffered data. Eliminates the previous second open() call.
+        PageBuf = tuple[list[tuple[float, str]], list[str], int]
+        page_buffer: list[PageBuf] = []
         with pdfplumber.open(str(path)) as pdf:
             for pp in pdf.pages:
-                chars_outside = [
-                    c
-                    for c in pp.chars
-                    if not _char_in_any_bbox(c, [t.bbox for t in pp.find_tables()])
-                ]
-                all_pages_lines.append(_group_chars_to_lines(chars_outside))
+                page_buffer.append(_pdfplumber_extract_page(pp))
 
+        all_pages_lines = [lines for lines, _, _ in page_buffer]
         running_lines = _detect_running_lines(all_pages_lines)
 
-        # Step 1 — per-page extraction.
-        with pdfplumber.open(str(path)) as pdf:
-            for page_index, plumber_page in enumerate(pdf.pages):
-                fitz_page = doc[page_index]
-                ocr_used = False
+        # Step 1 — per-page extraction using buffered pdfplumber data + fitz.
+        for page_index, (lines, markdown_tables, total_chars) in enumerate(page_buffer):
+            fitz_page = doc[page_index]
+            ocr_used = False
 
-                # 1a pdfplumber
-                lines, markdown_tables, total_chars = _pdfplumber_extract_page(plumber_page)
-                # The spec calls for `layout=config.pdf_layout_analysis` on
-                # extract_text(). Our chars-based path is layout-agnostic; we
-                # still honour the override by passing it to pdfplumber when
-                # falling back to its built-in extractor on edge cases.
-                _ = layout_analysis  # acknowledged; built-in extract_text path not currently exercised
+            # 1a pdfplumber data already buffered above.
+            # layout_analysis is acknowledged; chars-based path is layout-agnostic.
+            _ = layout_analysis
 
-                # 1b pymupdf text
-                if total_chars < config.ocr_char_threshold:
-                    lines, total_chars = _pymupdf_extract_text(fitz_page)
-                    markdown_tables = []
-                # 1c pymupdf OCR
-                if total_chars < config.ocr_char_threshold and config.ocr_enabled:
-                    logger.info("OCR used for page %s of %s", page_index + 1, path)
-                    lines, total_chars = _pymupdf_extract_ocr(fitz_page)
-                    markdown_tables = []
-                    ocr_used = True
+            # 1b pymupdf text
+            if total_chars < config.ocr_char_threshold:
+                lines, total_chars = _pymupdf_extract_text(fitz_page)
+                markdown_tables = []
+            # 1c pymupdf OCR
+            if total_chars < config.ocr_char_threshold and config.ocr_enabled:
+                logger.info("OCR used for page %s of %s", page_index + 1, path)
+                lines, total_chars = _pymupdf_extract_ocr(fitz_page)
+                markdown_tables = []
+                ocr_used = True
 
-                # Strip running headers/footers
-                stripped_lines = [
-                    (y, text)
-                    for y, text in lines
-                    if (
-                        round(y / _RUNNING_LINE_Y_TOLERANCE_PX) * _RUNNING_LINE_Y_TOLERANCE_PX,
-                        text.strip(),
-                    )
-                    not in running_lines
-                ]
+            # Strip running headers/footers
+            stripped_lines = [
+                (y, text)
+                for y, text in lines
+                if (
+                    round(y / _RUNNING_LINE_Y_TOLERANCE_PX) * _RUNNING_LINE_Y_TOLERANCE_PX,
+                    text.strip(),
+                )
+                not in running_lines
+            ]
 
-                # Step 2 — font-based heading sentinels
-                sentinel_map = _heading_sentinel_map(fitz_page)
-                body_text = "\n".join(text for _, text in stripped_lines)
-                if markdown_tables:
-                    body_text = body_text + "\n" + "\n\n".join(markdown_tables)
-                body_text = _inject_pdf_heading_sentinels(body_text, sentinel_map)
+            # Step 2 — font-based heading sentinels
+            sentinel_map = _heading_sentinel_map(fitz_page)
+            body_text = "\n".join(text for _, text in stripped_lines)
+            if markdown_tables:
+                body_text = body_text + "\n" + "\n\n".join(markdown_tables)
+            body_text = _inject_pdf_heading_sentinels(body_text, sentinel_map)
 
-                # Step 3 — text cleaning
-                body_text = _clean_pdf_text(body_text)
+            # Step 3 — text cleaning
+            body_text = _clean_pdf_text(body_text)
 
-                # Step 4 — page metadata assembly
-                heading_sentinels = [sent + text for text, sent in sentinel_map.items()]
-                page_metadata: dict[str, Any] = {
-                    "tables": markdown_tables,
-                    "ocr_used": ocr_used,
-                    "char_count": len(body_text),
-                    "heading_sentinels": heading_sentinels,
-                }
-                yield (page_index + 1, body_text, page_metadata)
+            # Step 4 — page metadata assembly
+            heading_sentinels = [sent + text for text, sent in sentinel_map.items()]
+            page_metadata: dict[str, Any] = {
+                "tables": markdown_tables,
+                "ocr_used": ocr_used,
+                "char_count": len(body_text),
+                "heading_sentinels": heading_sentinels,
+            }
+            yield (page_index + 1, body_text, page_metadata)
     finally:
         doc.close()
 
