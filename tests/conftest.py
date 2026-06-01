@@ -182,6 +182,80 @@ def mock_llm() -> _MockLLM:
 
 
 # ---------------------------------------------------------------------------
+# Fake embedder (always available; deterministic; 768-dim)
+# ---------------------------------------------------------------------------
+
+
+class _FakeEmbedder:
+    """Deterministic fixed-dimension embedder for CI without Ollama.
+
+    Dimension matches nomic-embed-text (768) so shape-sensitive code such as
+    ChromaDB collection creation behaves identically to production.
+
+    The embedding is a sparse unit vector whose non-zero position is derived
+    from the hash of the input text, giving different texts different vectors
+    while remaining fully deterministic across runs.
+    """
+
+    _DIM = 768
+
+    def embed(self, text: str) -> list[float]:
+        import math
+
+        vec = [0.0] * self._DIM
+        # Primary index from hash — distinct texts get distinct positions.
+        vec[abs(hash(text)) % self._DIM] = 1.0
+        # Secondary spread: spread a small weight across a few more positions so
+        # BM25-style keyword matches still dominate while vectors are non-trivial.
+        for i, ch in enumerate(text[:8]):
+            vec[(ord(ch) * (i + 1)) % self._DIM] += 0.1
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [v / norm for v in vec]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
+
+
+@pytest.fixture(scope="session")
+def fake_embedder() -> _FakeEmbedder:
+    """Deterministic 768-dim embedder; no Ollama required."""
+    return _FakeEmbedder()
+
+
+# ---------------------------------------------------------------------------
+# Integration embedder: real Ollama if available, fake otherwise
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def integration_embedder(ollama_available: bool, fake_embedder: _FakeEmbedder) -> Embedder:
+    """Real Ollama embedder when available; deterministic fake otherwise.
+
+    Use this fixture (not ollama_embedder) in integration tests that verify
+    cross-component wiring rather than retrieval quality — they run in CI
+    without Ollama.  Tests that specifically verify semantic ranking must use
+    ollama_embedder directly (and will skip without Ollama).
+    """
+    if not ollama_available:
+        return fake_embedder
+    from llama_index.embeddings.ollama import OllamaEmbedding
+
+    embedding = OllamaEmbedding(
+        model_name="nomic-embed-text",
+        base_url="http://localhost:11434",
+    )
+
+    class _Adapter:
+        def embed(self, text: str) -> list[float]:
+            return list(embedding.get_text_embedding(text))
+
+        def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            return [list(v) for v in embedding.get_text_embedding_batch(texts)]
+
+    return _Adapter()
+
+
+# ---------------------------------------------------------------------------
 # Real Ollama embedder (skips when Ollama not reachable)
 # ---------------------------------------------------------------------------
 
@@ -273,11 +347,12 @@ def real_llm(llm_model_available: bool) -> LLM:
 @pytest.fixture
 def indexed_pipeline(
     base_config: ARGConfig,
-    ollama_embedder: Embedder,
+    integration_embedder: Embedder,
     mock_llm: _MockLLM,
 ):
-    """ARGPipeline indexed over corpus_a with real embeddings + mocked LLM.
+    """ARGPipeline indexed over corpus_a with real/fake embeddings + mocked LLM.
 
+    Uses integration_embedder so this fixture runs in CI without Ollama.
     Watcher disabled. Cluster cache pre-built (small-corpus fallback). Closed
     automatically when the test finishes.
     """
@@ -287,7 +362,7 @@ def indexed_pipeline(
         config=base_config,
         corpus_name="default",
         llm=mock_llm,
-        embedder=ollama_embedder,
+        embedder=integration_embedder,
         skip_health_check=True,
         skip_signal_handlers=True,
     )

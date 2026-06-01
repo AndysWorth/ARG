@@ -51,7 +51,7 @@ def test_compound_query_decomposes_and_unions_chunks(indexed_pipeline, mock_llm)
     )
     mock_llm.respond_to(
         "Does the following question contain",
-        "How do I authenticate?\nWhat are the rate limits?",
+        '{"sub_questions": ["How do I authenticate?", "What are the rate limits?"]}',
     )
     mock_llm.respond_to("You are Archivist", "MOCKED_ANSWER")
 
