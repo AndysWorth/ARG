@@ -29,7 +29,7 @@ Retrieval is a 5-stage pipeline:
   the most relevant files; their link neighbourhoods and topic clusters expand
   the candidate pool.
 - **Stage 1 — Dense retrieval.** Top-k chunks via nomic-embed-text + ChromaDB.
-- **Stage 1.5 — BM25 retrieval.** Sparse exact-term recall via rank_bm25, run in
+- **Stage 1.5 — BM25 retrieval.** Sparse exact-term recall via bm25s (Rust-backed), run in
   parallel with dense.
 - **Stage 2 — Graph traversal.** Kuzu-backed link expansion: neighbours of the
   dense/sparse hits are added as additional candidates.
