@@ -15,16 +15,15 @@ index portable across the project's offline-first constraint.
 
 Persistence
 -----------
-The index is pickled. ``rank_bm25.BM25Okapi`` instances pickle cleanly along
-with their internal IDF / doc-length tables, so deserialisation is exact.
-The corresponding ``chunk_ids`` list is pickled alongside so queries can map
-ranked positions back to chunk identifiers.
+The index is pickled. The ``bm25s.BM25`` instance pickles cleanly, so
+deserialisation is exact. The corresponding ``chunk_ids`` list is pickled
+alongside so queries can map ranked positions back to chunk identifiers.
 
 Locality
 --------
-``rank_bm25`` is pure Python and runs in-process. The pickle file lives next
-to the rest of the per-corpus state (``arg_db/<corpus>/bm25_index.pkl``).
-No network involved.
+``bm25s`` is Rust-backed (via PyO3) and runs in-process. The pickle file
+lives next to the rest of the per-corpus state
+(``arg_db/<corpus>/bm25_index.pkl``). No network involved.
 """
 
 from __future__ import annotations
@@ -36,8 +35,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import bm25s
 import numpy as np
-from rank_bm25 import BM25Okapi
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class BM25Index:
     """
 
     chunk_ids: list[str] = field(default_factory=list)
-    bm25: BM25Okapi | None = field(default=None, repr=False)
+    bm25: Any = field(default=None, repr=False)
 
     @property
     def is_empty(self) -> bool:
@@ -81,12 +80,14 @@ class BM25Index:
             self.bm25 = None
             return
         self.chunk_ids = [cid for cid, _ in chunks]
-        tokenised = [_tokenize(text) for _, text in chunks]
-        # rank_bm25's BM25Okapi requires at least one non-empty document.
-        if not any(tokenised):
+        raw_texts = [text for _, text in chunks]
+        tokenized = bm25s.tokenize(raw_texts, stopwords=None, show_progress=False)
+        if not any(tokenized.ids):
             self.bm25 = None
             return
-        self.bm25 = BM25Okapi(tokenised)
+        index = bm25s.BM25()
+        index.index(tokenized, show_progress=False)
+        self.bm25 = index
 
     def save(self, path: Path) -> None:
         """Pickle the index to ``path``. Creates parent dirs if needed."""
@@ -105,15 +106,21 @@ class BM25Index:
         path = Path(path)
         if not path.is_file():
             return cls()
-        with path.open("rb") as fh:
-            payload = pickle.load(fh)
-        if not isinstance(payload, dict):
-            logger.warning("BM25 index at %s is not a dict; ignoring", path)
+        try:
+            with path.open("rb") as fh:
+                payload = pickle.load(fh)
+            if not isinstance(payload, dict):
+                logger.warning("BM25 index at %s is not a dict; ignoring", path)
+                return cls()
+            return cls(
+                chunk_ids=list(payload.get("chunk_ids", [])),
+                bm25=payload.get("bm25"),
+            )
+        except Exception as exc:
+            # Stale pickle (e.g. written by the old rank_bm25 library) — log and
+            # return empty so the next index() run rebuilds cleanly.
+            logger.warning("BM25 index at %s could not be loaded (%s); returning empty", path, exc)
             return cls()
-        return cls(
-            chunk_ids=list(payload.get("chunk_ids", [])),
-            bm25=payload.get("bm25"),
-        )
 
     # ------------------------------------------------------------------
     # Query
@@ -123,17 +130,15 @@ class BM25Index:
         """Return all chunks with raw BM25 scores, sorted descending.
 
         Unlike :meth:`query`, no ``score > 0`` filter is applied. This is
-        needed by doc-level aggregation in Stage 0, where BM25Okapi can
-        produce negative IDF values in small corpora and relative ranking
-        still carries signal.
+        needed by doc-level aggregation in Stage 0, where relative ranking
+        still carries signal even for zero-scoring documents.
         """
         if self.is_empty:
             return []
         tokens = _tokenize(q)
         if not tokens:
             return []
-        scores = self.bm25.get_scores(tokens)  # type: ignore[union-attr]
-        # numpy argsort is faster than Python sorted() for large arrays
+        scores = self.bm25.get_scores(tokens)
         order = np.argsort(-scores)
         return [(self.chunk_ids[int(i)], float(scores[i])) for i in order]
 
@@ -144,13 +149,11 @@ class BM25Index:
         tokens = _tokenize(q)
         if not tokens:
             return []
-        scores = self.bm25.get_scores(tokens)  # type: ignore[union-attr]
+        scores = self.bm25.get_scores(tokens)
         n = len(scores)
         if n == 0:
             return []
         k = min(top_k, n)
-        # argpartition: O(n) to isolate top-k, then O(k log k) to sort them.
-        # Significantly faster than O(n log n) full sort when top_k << n.
         top_idx = np.argpartition(-scores, k - 1)[:k] if k < n else np.arange(n)
         top_idx = top_idx[np.argsort(-scores[top_idx])]
         return [

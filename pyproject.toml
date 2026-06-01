@@ -31,7 +31,7 @@ dependencies = [
     # DCI clustering
     "scikit-learn>=1.4",
     # Sparse retrieval
-    "rank-bm25>=0.2.2",
+    "bm25s>=0.2",
 ]
 
 [project.optional-dependencies]
