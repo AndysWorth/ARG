@@ -55,6 +55,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff mypy pytest pytest-asyncio
 
+      - name: Check all arg/ imports load cleanly
+        run: python scripts/check_imports.py
+
       - name: ruff check
         run: ruff check .
 

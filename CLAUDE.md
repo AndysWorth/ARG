@@ -14,6 +14,39 @@ Quality gates: `ruff` (lint+format), `mypy` (types), `pytest`, `pre-commit` — 
 
 ---
 
+### Session start checklist
+
+Before making any changes in a session:
+
+1. `source .venv/bin/activate`
+2. `python scripts/check_imports.py` — verify no imports are broken before touching anything
+3. Re-read the relevant `.claude/rules/` file(s) for the module being touched
+4. Run the module's tests to establish a baseline: `pytest tests/unit/test_<module>.py -x -q`
+
+After all edits:
+- `ruff check arg/` then `mypy arg/ --ignore-missing-imports`
+- Run the locality check: `grep -rn "requests\.\|httpx\.get\|http://" arg/ --include="*.py" | grep -v "localhost\|127.0.0.1\|11434\|test_"`
+- `pytest tests/unit/ -q` — full unit suite must stay green
+
+---
+
+### Test discipline
+
+**If a test must change to accommodate an implementation change, pause and confirm before proceeding. A test change is a contract change.**
+
+Specifically:
+- `tests/unit/test_invariants.py` and `tests/unit/test_concurrency.py` are **off-limits** — only add to them, never modify existing tests
+- Never add `pytest.mark.skip` or `pytest.mark.xfail` without a tracked reason in the commit message
+- Track test counts: `pytest tests/unit/ --co -q 2>/dev/null | tail -1` — the total must not decrease
+
+---
+
+### Branch sizing
+
+Keep branches to ≤ 7 changed files. When a branch needs more, split it. Oversized branches are harder to review and more likely to introduce conflicts.
+
+---
+
 ### Section-by-section flow (what Claude Code does automatically)
 
 For each section, Claude Code will:
