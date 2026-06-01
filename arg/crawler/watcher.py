@@ -29,6 +29,8 @@ Lifecycle
 ``pipeline.close``, so it is expected to handle "already stopped" gracefully.
 Pending debounce timers are cancelled in :meth:`stop` so a callback firing
 after ``stop()`` returned won't surprise the caller.
+
+# Implements: docs/spec/section-05-crawler.md
 """
 
 from __future__ import annotations

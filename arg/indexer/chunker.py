@@ -26,6 +26,8 @@ Strategy (Section 7 spec)
 
 The chunker does NOT touch ChromaDB or Kuzu — it returns plain data. The
 indexer (`arg.indexer.indexer`) is what writes the chunks out to both stores.
+
+# Implements: docs/spec/section-07-indexer.md
 """
 
 from __future__ import annotations
@@ -121,7 +123,7 @@ def chunk_document(doc: Document, config: ARGConfig) -> list[ChunkedSection]:
 
     sections = _split_into_sections(doc.content, title)
     out: list[ChunkedSection] = []
-    position = 0
+    position = 0  # global across sections — Kuzu orders chunks by this; do not reset per section
     for section in sections:
         for window_text in _sliding_window(section.text, config):
             chunk_id = f"{doc_id}::chunk::{position}"

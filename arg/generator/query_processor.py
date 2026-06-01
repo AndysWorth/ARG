@@ -16,6 +16,8 @@ retriever sees an embedding:
 
 The LLM always sees the *raw* query at generation time. Rewrites and HyDE
 paragraphs are retrieval-only artefacts.
+
+# Implements: docs/spec/section-09-generator.md
 """
 
 from __future__ import annotations

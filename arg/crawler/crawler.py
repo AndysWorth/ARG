@@ -24,6 +24,8 @@ schemes and any path that escapes ``docs_root``. Combined with the
 ``ARGConfig.ollama_base_url`` localhost check, this is one of the layers that
 makes ARG's locality guarantee hold even when the corpus contains links to the
 public internet.
+
+# Implements: docs/spec/section-05-crawler.md
 """
 
 from __future__ import annotations

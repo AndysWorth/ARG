@@ -16,6 +16,8 @@ reference cover the full RAG + DCI surface.
 The summary cache writes to ``{corpus_root}/summaries/{hash}.json`` when
 ``config.summary_cache`` is True. Cache invalidation is the caller's
 responsibility (pipeline.update_document re-summarises on the next call).
+
+# Implements: docs/spec/section-10-pipeline.md
 """
 
 from __future__ import annotations

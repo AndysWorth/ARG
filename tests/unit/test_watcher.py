@@ -33,6 +33,7 @@ from arg.crawler.watcher import (
     EVENT_MODIFIED,
     DocsWatcher,
 )
+from tests.conftest import _wait_for
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -221,8 +222,7 @@ def test_rapid_events_coalesce_into_one_callback(tmp_path, docs_root):
     # Within the debounce window: no callback yet.
     assert rec.events == []
     # Wait past the debounce; pending timer should fire exactly once.
-    time.sleep(0.2)
-    assert rec.kinds_for("page.html") == [EVENT_MODIFIED]
+    assert _wait_for(lambda: rec.kinds_for("page.html") == [EVENT_MODIFIED], timeout=2.0)
 
 
 def test_debounce_per_path(tmp_path, docs_root):
@@ -235,9 +235,9 @@ def test_debounce_per_path(tmp_path, docs_root):
     b.touch()
     watcher.handler.on_modified(FileModifiedEvent(str(a)))
     watcher.handler.on_modified(FileModifiedEvent(str(b)))
-    time.sleep(0.2)
-    names = sorted(p.name for p, _ in rec.events)
-    assert names == ["a.html", "b.html"]
+    assert _wait_for(
+        lambda: sorted(p.name for p, _ in rec.events) == ["a.html", "b.html"], timeout=2.0
+    )
 
 
 def test_debounce_window_resets_on_each_event(tmp_path, docs_root):
@@ -252,9 +252,8 @@ def test_debounce_window_resets_on_each_event(tmp_path, docs_root):
         time.sleep(0.03)
     # We've been editing for ~120ms but each event resets the timer; no callback yet.
     assert rec.events == []
-    # Stop editing; wait one full window plus headroom.
-    time.sleep(0.15)
-    assert rec.kinds_for("page.html") == [EVENT_MODIFIED]
+    # Stop editing; poll until the debounce fires.
+    assert _wait_for(lambda: rec.kinds_for("page.html") == [EVENT_MODIFIED], timeout=2.0)
 
 
 def test_zero_debounce_fires_synchronously(tmp_path, docs_root):

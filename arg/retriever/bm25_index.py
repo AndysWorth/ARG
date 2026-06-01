@@ -24,6 +24,8 @@ Locality
 ``bm25s`` is Rust-backed (via PyO3) and runs in-process. The pickle file
 lives next to the rest of the per-corpus state
 (``arg_db/<corpus>/bm25_index.pkl``). No network involved.
+
+# Implements: docs/spec/section-08-retriever.md
 """
 
 from __future__ import annotations

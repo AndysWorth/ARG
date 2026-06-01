@@ -117,13 +117,12 @@ def test_chunks_do_not_exceed_chunk_size(tmp_path, base_config):
 
 def test_chunk_overlap_is_applied(tmp_path):
     """Consecutive chunks within one section must share `overlap` tokens."""
-    docs = Path("/tmp/dummy_docs")
-    docs.mkdir(exist_ok=True)
-    db = Path("/tmp/dummy_db")
-    config = ARGConfig(docs_root=docs, db_path=db, chunk_size=200, chunk_overlap=50)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    config = ARGConfig(docs_root=docs, db_path=tmp_path / "db", chunk_size=200, chunk_overlap=50)
     long_text = " ".join(f"word{i}" for i in range(2000))
     content = f"##H1## Section\n{long_text}\n"
-    doc = _doc(Path("/tmp"), content)
+    doc = _doc(tmp_path, content)
     chunks = chunk_document(doc, config)
     assert len(chunks) >= 2
     # The last tokens of chunk N should appear at the start of chunk N+1.

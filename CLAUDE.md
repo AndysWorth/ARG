@@ -113,6 +113,19 @@ Post-build eval: `python scripts/eval_retrieval.py --db ./arg_db --corpus defaul
 `config.ollama_base_url` (localhost:11434). Bootstrap is the only step that may touch
 the network. See `.claude/rules/core.md` for the enforced invariant.
 
+### Technology stack (key choices)
+
+| Layer | Library / tool | Notes |
+|---|---|---|
+| **Embeddings** | nomic-embed-text via Ollama | Local inference; no cloud API |
+| **LLM** | qwen3.6:35b-a3b-q4_K_M via Ollama | Local inference; no cloud API |
+| **Vector store** | ChromaDB | Two collections per corpus: documents + chunks |
+| **Graph DB** | Kuzu (embedded) | LINKS_TO + CONTAINS edges |
+| **Sparse Retrieval** | bm25s (Rust-backed BM25) | Replaced rank_bm25; Feature 0003. |
+| **PDF Parsing** | pdfplumber (primary) + pymupdf (fallback + OCR) | Single-pass extraction; Feature 0003. |
+| **Text Parsing** | Python stdlib `pathlib.Path.read_text()` | UTF-8 with latin-1 fallback; Feature 0001. |
+| **Web framework** | FastAPI | Local-only; never exposed to public internet |
+
 ---
 
 ## 2. Project Structure
@@ -217,6 +230,18 @@ arg/
 ## 12. End-to-End Test & Fixture Corpus
 
 > **Full spec:** [docs/spec/section-12-e2e.md](docs/spec/section-12-e2e.md)
+
+---
+
+## 13. Architectural Decision Records
+
+Post-build changes with lasting impact. Each row is a decision + rationale so
+future Claude sessions can judge whether it's still load-bearing.
+
+| Decision | Summary |
+|---|---|
+| Plain-text indexing | Feature 0001: `.txt` / `.md` / `.markdown` accepted via `extract_text`; UTF-8 → latin-1 fallback; no markdown heading detection (future feature). |
+| Large-corpus hardening | Feature 0003: bm25s replaces rank_bm25; cluster compute async; batched embedding fetch; single-pass PDF extraction; parallel sub-query embedding; correctness fixes for duplicate edges, SKIP/LIMIT, and nested `$and` filters. See `docs/features/0003-large-corpus-hardening.md`. |
 
 ---
 

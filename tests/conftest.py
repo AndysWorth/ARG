@@ -28,7 +28,8 @@ running locally, integration tests are skipped — never failed.
 from __future__ import annotations
 
 import socket
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,27 @@ from arg.embeddings import Embedder
 from arg.llm import LLM
 
 _FIXTURES = Path(__file__).parent / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# Polling helper
+# ---------------------------------------------------------------------------
+
+
+def _wait_for(condition: Callable[[], bool], timeout: float = 2.0, interval: float = 0.02) -> bool:
+    """Poll *condition* until it returns True or *timeout* seconds elapse.
+
+    Returns True when the condition was satisfied, False on timeout.  Tests
+    should assert on the return value::
+
+        assert _wait_for(lambda: cache.is_file()), "cache not written within 2s"
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(interval)
+    return condition()
 
 
 # ---------------------------------------------------------------------------

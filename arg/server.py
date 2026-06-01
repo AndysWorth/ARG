@@ -21,6 +21,8 @@ Streaming
 plaintext SSE-style chunks (`data: <token>\\n\\n`). Non-streaming responses
 are JSON. Sources + latency are returned only in the non-streaming path —
 streaming callers re-fetch via a follow-up call if they need them.
+
+# Implements: docs/spec/section-10-pipeline.md
 """
 
 from __future__ import annotations
@@ -263,8 +265,13 @@ def create_app(pipelines: dict[str, ARGPipeline]) -> FastAPI:
             page=page, page_size=page_size, order=order
         )
 
-    # The doc-detail catch-all MUST be the last /corpus/* route; everything
-    # else needs to register first or it gets shadowed.
+    # /corpus/{doc_id:path} is a catch-all and MUST be registered last.
+    # Routes registered before it (in order):
+    #   /corpus, /corpus/add, /corpus/<doc_id>/linked-by, /corpus/graph,
+    #   /corpus/topics, /corpus/search, /corpus/<doc_id>/summary,
+    #   /corpus/<doc_id>/chunks, /corpus/<doc_id>/search, /corpus/compare,
+    #   /corpus/stats, /corpus/stats/by-size
+    # Any new specific route must go above this line.
     @app.get("/corpus/{doc_id:path}")
     def doc_detail(doc_id: str, corpus: str = Query("default")) -> dict[str, Any]:
         """Single-doc metadata + key points. Catch-all for /corpus/<doc_id>."""

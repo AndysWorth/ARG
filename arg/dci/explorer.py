@@ -25,6 +25,8 @@ Persisted to ``cluster_cache_path`` (per-corpus). Shape:
 Computed at the end of ``ARGPipeline.index()`` and on demand via
 :meth:`get_topic_clusters`. :meth:`invalidate_cluster_cache` deletes the
 file so the next call recomputes.
+
+# Implements: docs/spec/section-10-pipeline.md
 """
 
 from __future__ import annotations

@@ -19,6 +19,8 @@ Empty-context contract
 If retrieval returns zero chunks across all sub-queries, ``generate`` short-
 circuits and returns the spec-mandated fallback string
 ("The documentation does not cover this topic.") without calling the LLM.
+
+# Implements: docs/spec/section-09-generator.md
 """
 
 from __future__ import annotations

@@ -28,13 +28,13 @@ The whole file is skipped when Ollama isn't reachable on
 from __future__ import annotations
 
 import shutil
-import time
 from pathlib import Path
 
 import pytest
 
 from arg.config import ARGConfig
 from arg.pipeline import ARGPipeline
+from tests.conftest import _wait_for
 
 pytestmark = pytest.mark.e2e
 
@@ -198,21 +198,19 @@ def test_watcher_live_add_remove(tmp_path, corpus_a_path, ollama_embedder, mock_
             "<body><h1>Hot Drop</h1><p>This document arrived after indexing.</p></body></html>",
             encoding="utf-8",
         )
-        # Wait debounce + headroom for the indexer to finish + retriever reload.
-        time.sleep(0.4)
-
-        after_add = {d["doc_id"] for d in pipeline.graph.list_all_documents()}
         new_doc_id = str(new_page.resolve())
-        assert new_doc_id in after_add - baseline, (
-            f"expected {new_page.name} in the listing after drop;\n"
-            f"baseline={baseline}\nafter_add={after_add}"
-        )
+        # Poll until debounce fires and the indexer adds the doc.
+        assert _wait_for(
+            lambda: new_doc_id in {d["doc_id"] for d in pipeline.graph.list_all_documents()},
+            timeout=5.0,
+        ), f"expected {new_page.name} in the listing after drop;\nbaseline={baseline}"
 
         # Delete it; watcher should remove it from the listing.
         new_page.unlink()
-        time.sleep(0.4)
-        after_delete = {d["doc_id"] for d in pipeline.graph.list_all_documents()}
-        assert new_doc_id not in after_delete
+        assert _wait_for(
+            lambda: new_doc_id not in {d["doc_id"] for d in pipeline.graph.list_all_documents()},
+            timeout=5.0,
+        ), f"{new_page.name} still in listing after delete"
     finally:
         pipeline.close()
 

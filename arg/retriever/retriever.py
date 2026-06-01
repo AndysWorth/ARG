@@ -32,6 +32,8 @@ reordering still applies.
 
 The returned ``list[NodeWithScore]`` uses LlamaIndex's schema types so the
 generator (Section 9) can hand them directly to a query engine.
+
+# Implements: docs/spec/section-08-retriever.md
 """
 
 from __future__ import annotations

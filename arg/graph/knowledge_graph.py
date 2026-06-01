@@ -31,6 +31,8 @@ Kuzu quirks worth recording (verified against 0.11.3)
     the source ``doc_id`` to give callers the linked-set semantics they expect.
   * ``CREATE NODE TABLE IF NOT EXISTS`` and ``CREATE REL TABLE IF NOT EXISTS``
     are supported, so the schema-init step is fully idempotent.
+
+# Implements: docs/spec/section-06-knowledge-graph.md
 """
 
 from __future__ import annotations

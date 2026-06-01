@@ -36,6 +36,8 @@ Locality
 The default embedder + LLM use ``config.ollama_base_url`` which the
 ARGConfig validator already restricts to localhost. ``skip_health_check``
 exists for the test path; production code never sets it.
+
+# Implements: docs/spec/section-10-pipeline.md
 """
 
 from __future__ import annotations

@@ -40,6 +40,8 @@ embedding goes through the injected :class:`Embedder` (production uses an
 Ollama-backed implementation pointed at ``config.ollama_base_url``, which the
 config validator already restricts to localhost). The hash file and the BM25
 pickle are local files.
+
+# Implements: docs/spec/section-07-indexer.md
 """
 
 from __future__ import annotations

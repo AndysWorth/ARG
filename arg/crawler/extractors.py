@@ -27,6 +27,8 @@ Locality
 --------
 This module reads files from disk only. It does not make HTTP requests; the
 crawler enforces the same guarantee for cross-file traversal.
+
+# Implements: docs/spec/section-05-crawler.md
 """
 
 from __future__ import annotations

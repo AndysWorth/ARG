@@ -24,6 +24,8 @@ hook for *evaluation* backends (Weights & Biases, Arize Phoenix, Langfuse,
 etc.) — `"none"` is not a registered eval mode, so the call raises
 `ValueError` on 0.14.x. The library's default state (`global_handler is None`)
 IS the no-telemetry state, so we leave it alone.
+
+# Implements: docs/spec/section-04-config.md
 """
 
 from __future__ import annotations
