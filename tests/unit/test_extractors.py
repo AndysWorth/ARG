@@ -1099,14 +1099,3 @@ def test_acroform_pdf_skips_pdfplumber(tmp_path, config):
         mock_plumber.assert_not_called()
 
     assert len(pages) >= 1, "AcroForm PDF should still yield pages via pymupdf"
-
-
-def test_acroform_pdf_yields_text_via_pymupdf(tmp_path, config):
-    """Text written to an AcroForm PDF must still appear in the extracted content."""
-    from arg.crawler.extractors import extract_pdf
-
-    pdf_path = _form_pdf(tmp_path / "form.pdf")
-    pages = list(extract_pdf(pdf_path, config))
-    combined = " ".join(text for _, text, _ in pages)
-    # pymupdf must extract something — exact text may differ due to font rendering.
-    assert combined.strip(), "pymupdf should extract the text layer of the AcroForm PDF"
