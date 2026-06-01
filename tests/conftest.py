@@ -192,23 +192,22 @@ class _FakeEmbedder:
     Dimension matches nomic-embed-text (768) so shape-sensitive code such as
     ChromaDB collection creation behaves identically to production.
 
-    The embedding is a sparse unit vector whose non-zero position is derived
-    from the hash of the input text, giving different texts different vectors
-    while remaining fully deterministic across runs.
+    Uses a bag-of-words approach with hashlib.md5 per word so embeddings are:
+    - Stable across Python versions, platforms, and PYTHONHASHSEED values.
+    - Keyword-aware: texts sharing words get similar vectors, making integration
+      tests that assert retrieval coverage reliable without a real embedder.
     """
 
     _DIM = 768
 
     def embed(self, text: str) -> list[float]:
+        import hashlib
         import math
 
         vec = [0.0] * self._DIM
-        # Primary index from hash — distinct texts get distinct positions.
-        vec[abs(hash(text)) % self._DIM] = 1.0
-        # Secondary spread: spread a small weight across a few more positions so
-        # BM25-style keyword matches still dominate while vectors are non-trivial.
-        for i, ch in enumerate(text[:8]):
-            vec[(ord(ch) * (i + 1)) % self._DIM] += 0.1
+        for word in text.lower().split():
+            idx = int(hashlib.md5(word.encode()).hexdigest(), 16) % self._DIM
+            vec[idx] += 1.0
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         return [v / norm for v in vec]
 
