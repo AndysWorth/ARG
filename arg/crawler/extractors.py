@@ -53,6 +53,12 @@ from arg.config import ARGConfig
 
 logger = logging.getLogger(__name__)
 
+# pdfminer and pdfplumber emit spurious WARNING-level lines for normal PDF
+# quirks (missing FontBBox, non-standard color spaces, inline images). These
+# are not actionable and drown out real warnings at ~288 lines per corpus run.
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
+logging.getLogger("pdfplumber").setLevel(logging.ERROR)
+
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -911,14 +917,42 @@ def extract_pdf(path: Path, config: ARGConfig) -> Iterator[tuple[int, str, dict[
         sidecar = _read_pdf_sidecar(path)
         layout_analysis = bool(sidecar.get("pdf_layout_analysis", config.pdf_layout_analysis))
 
+        is_form = bool(doc.is_form_pdf)
+
+        # Pre-flight text-density check: sample up to 5 pages with pymupdf (fast,
+        # C-level) to measure average extractable chars per page. Image-dominated
+        # PDFs (scanned maps, photo archives) produce near-zero text via pdfplumber
+        # while taking hours to process; skipping pdfplumber for them avoids the
+        # worst-case hangs. OCR-enabled runs still process these files via Stage 1c.
+        sample_pages = min(doc.page_count, 5)
+        sample_chars = sum(len(doc[i].get_text("text")) for i in range(sample_pages))
+        avg_chars = sample_chars / sample_pages if sample_pages else 0
+        is_image_dominated = avg_chars < config.pdf_min_chars_per_page
+
+        if is_image_dominated:
+            logger.info(
+                "PDF %s has avg %.1f chars/page (threshold %d) — skipping pdfplumber",
+                path,
+                avg_chars,
+                config.pdf_min_chars_per_page,
+            )
+
         # Single-pass pdfplumber: buffer (lines, tables, nchars) for every page,
         # run running-header detection on the full buffer, then process pages
         # using the buffered data. Eliminates the previous second open() call.
+        # AcroForm PDFs skip pdfplumber entirely — it is slow and produces
+        # incomplete text for form fields; pymupdf's text layer is faster and
+        # more complete for this file type.
         PageBuf = tuple[list[tuple[float, str]], list[str], int]
         page_buffer: list[PageBuf] = []
-        with pdfplumber.open(str(path)) as pdf:
-            for pp in pdf.pages:
-                page_buffer.append(_pdfplumber_extract_page(pp))
+        if not is_form and not is_image_dominated:
+            with pdfplumber.open(str(path)) as pdf:
+                for pp in pdf.pages:
+                    page_buffer.append(_pdfplumber_extract_page(pp))
+        else:
+            # AcroForm or image-dominated: skip pdfplumber; pymupdf (Stages 1b/1c)
+            # will fill each page in the per-page loop below.
+            page_buffer = [([], [], 0)] * doc.page_count
 
         all_pages_lines = [lines for lines, _, _ in page_buffer]
         running_lines = _detect_running_lines(all_pages_lines)

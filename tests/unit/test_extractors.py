@@ -1020,3 +1020,93 @@ def test_extract_pdf_to_document_assembles_document(tmp_path, config):
     assert "LINE_ONE_MARKER" in doc.content
     assert isinstance(doc.metadata["page_metadata"], list)
     assert doc.metadata["page_metadata"][0]["page_number"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Feature 0004 — PDF extraction efficiency
+# ---------------------------------------------------------------------------
+
+
+def test_image_dominated_pdf_skips_pdfplumber(tmp_path, config):
+    """A PDF with no extractable text skips pdfplumber and yields a stub or OCR result.
+
+    An image-only page produced by fitz produces zero chars via get_text(), so
+    avg_chars will be 0 — below any positive pdf_min_chars_per_page value.
+    With OCR disabled the page falls through to an empty body; what matters is
+    that extract_pdf returns without raising and pdfplumber is never opened.
+    """
+    from unittest.mock import patch
+
+    import pymupdf as fitz
+
+    from arg.crawler.extractors import extract_pdf
+
+    # Build a single blank page (no text layer at all).
+    pdf_path = tmp_path / "blank.pdf"
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(str(pdf_path))
+    doc.close()
+
+    no_ocr_config = ARGConfig(
+        docs_root=tmp_path,
+        db_path=tmp_path / "db",
+        ocr_enabled=False,
+        pdf_min_chars_per_page=30,
+    )
+
+    with patch("pdfplumber.open") as mock_plumber:
+        pages = list(extract_pdf(pdf_path, no_ocr_config))
+        mock_plumber.assert_not_called()
+
+    # Generator must not raise; it may yield zero or one (empty) pages.
+    assert isinstance(pages, list)
+
+
+def test_text_rich_pdf_uses_pdfplumber(tmp_path, config):
+    """A PDF with plenty of text is not flagged as image-dominated."""
+    from unittest.mock import patch
+
+    import pdfplumber
+
+    from arg.crawler.extractors import extract_pdf
+
+    pdf_path = _native_pdf(tmp_path / "rich.pdf")
+
+    open_calls: list[str] = []
+    real_open = pdfplumber.open
+
+    def _tracking_open(path, *args, **kwargs):
+        open_calls.append(str(path))
+        return real_open(path, *args, **kwargs)
+
+    with patch("pdfplumber.open", side_effect=_tracking_open):
+        list(extract_pdf(pdf_path, config))
+
+    assert open_calls, "pdfplumber.open must be called for a text-rich PDF"
+
+
+def test_acroform_pdf_skips_pdfplumber(tmp_path, config):
+    """AcroForm PDFs must not call pdfplumber.open."""
+    from unittest.mock import patch
+
+    from arg.crawler.extractors import extract_pdf
+
+    pdf_path = _form_pdf(tmp_path / "form.pdf")
+
+    with patch("pdfplumber.open") as mock_plumber:
+        pages = list(extract_pdf(pdf_path, config))
+        mock_plumber.assert_not_called()
+
+    assert len(pages) >= 1, "AcroForm PDF should still yield pages via pymupdf"
+
+
+def test_acroform_pdf_yields_text_via_pymupdf(tmp_path, config):
+    """Text written to an AcroForm PDF must still appear in the extracted content."""
+    from arg.crawler.extractors import extract_pdf
+
+    pdf_path = _form_pdf(tmp_path / "form.pdf")
+    pages = list(extract_pdf(pdf_path, config))
+    combined = " ".join(text for _, text, _ in pages)
+    # pymupdf must extract something — exact text may differ due to font rendering.
+    assert combined.strip(), "pymupdf should extract the text layer of the AcroForm PDF"

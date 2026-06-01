@@ -350,3 +350,57 @@ def test_crawler_yields_pdf_document_for_valid_pdf(docs_root, config):
     assert len(pdf_docs) == 1
     assert pdf_docs[0].metadata["title"] == "Manual"
     assert pdf_docs[0].path == pdf_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Feature 0004 — extraction timeout
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_extraction_timeout_skips_slow_pdf(docs_root, tmp_path):
+    """When extraction exceeds pdf_extract_timeout_seconds the file is skipped."""
+    import time
+    from unittest.mock import patch
+
+    from arg.crawler.crawler import _extract_pdf_with_timeout
+
+    slow_config = ARGConfig(
+        docs_root=docs_root,
+        db_path=tmp_path / "db",
+        pdf_extract_timeout_seconds=1,
+    )
+
+    pdf_path = docs_root / "slow.pdf"
+    pdf_path.touch()
+
+    def _slow(*_args, **_kwargs):
+        time.sleep(5)
+        return None
+
+    with patch("arg.crawler.crawler.extract_pdf_to_document", side_effect=_slow):
+        result = _extract_pdf_with_timeout(pdf_path, slow_config)
+
+    assert result is None, "timed-out PDF extraction must return None"
+
+
+def test_pdf_extraction_timeout_zero_disables_timeout(docs_root, tmp_path):
+    """pdf_extract_timeout_seconds=0 must call extract_pdf_to_document directly."""
+    from unittest.mock import MagicMock, patch
+
+    from arg.crawler.crawler import _extract_pdf_with_timeout
+
+    no_timeout_config = ARGConfig(
+        docs_root=docs_root,
+        db_path=tmp_path / "db",
+        pdf_extract_timeout_seconds=0,
+    )
+
+    pdf_path = docs_root / "doc.pdf"
+    pdf_path.touch()
+    sentinel = MagicMock()
+
+    with patch("arg.crawler.crawler.extract_pdf_to_document", return_value=sentinel) as mock_fn:
+        result = _extract_pdf_with_timeout(pdf_path, no_timeout_config)
+
+    mock_fn.assert_called_once_with(pdf_path, no_timeout_config)
+    assert result is sentinel

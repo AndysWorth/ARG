@@ -104,7 +104,11 @@ class ARGConfig:
     ocr_char_threshold: int = 100
     pdf_layout_analysis: bool = True
     pdf_overrides: dict[str, dict[str, Any]] | None = None
-    pdf_batch_size: int = 10
+    pdf_min_chars_per_page: int = 30  # below this avg → skip pdfplumber (image-dominated)
+    pdf_extract_timeout_seconds: int = 300  # 0 = no timeout
+
+    # --- Embedder ---------------------------------------------------------
+    embed_num_ctx: int = 2048  # nomic-embed-text context window; keeps KV cache minimal
 
     # --- Logging ----------------------------------------------------------
     debug_tracing: bool = False
@@ -279,7 +283,10 @@ class ARGConfig:
             "OCR_ENABLED": ("ocr_enabled", _parse_bool),
             "OCR_CHAR_THRESHOLD": ("ocr_char_threshold", int),
             "PDF_LAYOUT_ANALYSIS": ("pdf_layout_analysis", _parse_bool),
-            "PDF_BATCH_SIZE": ("pdf_batch_size", int),
+            "PDF_MIN_CHARS_PER_PAGE": ("pdf_min_chars_per_page", int),
+            "PDF_EXTRACT_TIMEOUT": ("pdf_extract_timeout_seconds", int),
+            # Embedder
+            "EMBED_NUM_CTX": ("embed_num_ctx", int),
             # Logging
             "DEBUG_TRACING": ("debug_tracing", _parse_bool),
             "ARG_DEBUG": ("debug_tracing", _parse_bool),

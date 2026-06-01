@@ -280,7 +280,7 @@ class ARGPipeline:
                             model=_model,
                             input=snippet,
                             truncate=True,
-                            options={"num_ctx": 8192},
+                            options={"num_ctx": self.config.embed_num_ctx},
                         )
                         if not result.embeddings:
                             raise ValueError(

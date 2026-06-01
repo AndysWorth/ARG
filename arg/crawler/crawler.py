@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -232,18 +233,42 @@ def _extract_for_path(path: Path, config: ARGConfig) -> Document | None:
         if suffix in _HTML_SUFFIXES:
             return extract_html(path, config)
         if suffix in _PDF_SUFFIXES:
-            return extract_pdf_to_document(path, config)
+            return _extract_pdf_with_timeout(path, config)
         if suffix in _TEXT_SUFFIXES:
             return extract_text(path, config)
     except FileNotFoundError as exc:
-        # A link or directory walk pointed at a path that's no longer there
-        # (race with the watcher, broken symlink, etc.).
         logger.warning("crawler: file disappeared during extraction: %s (%s)", path, exc)
     except Exception as exc:
-        # Malformed HTML / PDF that the extractor can't handle. Real-world
-        # corpora carry these; one bad file must not kill the whole index.
         logger.exception("crawler: extractor failed for %s (%s); skipping", path, exc)
     return None
+
+
+def _extract_pdf_with_timeout(path: Path, config: ARGConfig) -> Document | None:
+    """Run `extract_pdf_to_document` with an optional wall-clock timeout.
+
+    When `config.pdf_extract_timeout_seconds == 0` the call is made directly
+    (no ThreadPoolExecutor overhead). Otherwise a single-worker pool enforces
+    the deadline; a timed-out future is cancelled and the file is skipped.
+
+    Note: cancelling a future does not kill the running thread — pdfplumber
+    may continue consuming CPU until it finishes or the process exits. This is
+    acceptable; the document is skipped and indexing continues unblocked.
+    """
+    timeout = config.pdf_extract_timeout_seconds
+    if timeout <= 0:
+        return extract_pdf_to_document(path, config)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(extract_pdf_to_document, path, config)
+        try:
+            return fut.result(timeout=timeout)
+        except TimeoutError:
+            logger.warning(
+                "crawler: PDF extraction timed out after %ds, skipping: %s",
+                timeout,
+                path,
+            )
+            fut.cancel()
+            return None
 
 
 def _resolve_links(
