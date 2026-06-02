@@ -275,6 +275,7 @@ future Claude sessions can judge whether it's still load-bearing.
 |---|---|
 | Plain-text indexing | Feature 0001: `.txt` / `.md` / `.markdown` accepted via `extract_text`; UTF-8 → latin-1 fallback; no markdown heading detection (future feature). |
 | Large-corpus hardening | Feature 0003: bm25s replaces rank_bm25; cluster compute async; batched embedding fetch; single-pass PDF extraction; parallel sub-query embedding; correctness fixes for duplicate edges, SKIP/LIMIT, and nested `$and` filters. See `docs/features/0003-large-corpus-hardening.md`. |
+| Index quality (Feature 0006) | Warns on 0-chunk docs; `max_chunks_per_doc` cap prevents large manuals from dominating BM25; AcroForm field values extracted via `page.widgets()`; encrypted PDFs produce searchable stubs; `n_clusters` default raised 8→16; OCR quality logged when page yields <25 chars post-OCR. See `docs/features/0006-index-quality-improvements.md`. |
 
 ---
 
