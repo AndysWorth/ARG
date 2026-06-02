@@ -51,6 +51,7 @@ import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import chromadb
@@ -150,6 +151,7 @@ class Indexer:
         import time as _time
 
         stats = IndexStats()
+        zero_chunk_paths: list[Path] = []
         indexed_doc_ids: set[str] = set()
         link_records: list[tuple[str, str]] = []
 
@@ -170,6 +172,8 @@ class Indexer:
             elapsed_ms = int((_time.perf_counter() - t0) * 1000)
             stats.documents_indexed += 1
             stats.chunks_written += n_chunks
+            if n_chunks == 0:
+                zero_chunk_paths.append(doc.path)
             logger.info(
                 "[#%d] indexed %s (%d chunks, %d ms)",
                 i,
@@ -192,6 +196,12 @@ class Indexer:
                 self.kg.add_link(src, target, "")
                 stats.links_recorded += 1
 
+        if zero_chunk_paths:
+            logger.warning(
+                "index complete: %d doc(s) produced 0 chunks: %s",
+                len(zero_chunk_paths),
+                ", ".join(str(p) for p in zero_chunk_paths),
+            )
         self._write_bm25_index()
         self._save_hashes()
         return stats
@@ -272,6 +282,8 @@ class Indexer:
 
         # Chunk rows.
         sections = chunk_document(doc, self.config)
+        if not sections:
+            logger.warning("indexed with 0 chunks: %s", doc.path)
         if sections:
             embed_texts = [s.embedding_text for s in sections]
             vecs = self.embedder.embed_batch(embed_texts)

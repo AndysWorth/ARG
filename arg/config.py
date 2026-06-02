@@ -119,8 +119,9 @@ class ARGConfig:
 
     # --- DCI --------------------------------------------------------------
     summary_cache: bool = False
-    n_clusters: int = 8
+    n_clusters: int = 16
     min_cluster_docs: int = 10
+    max_chunks_per_doc: int = 0  # 0 = unlimited
 
     # --- Crawler ----------------------------------------------------------
     max_file_depth: int = 100
@@ -301,6 +302,7 @@ class ARGConfig:
             "SUMMARY_CACHE": ("summary_cache", _parse_bool),
             "N_CLUSTERS": ("n_clusters", int),
             "MIN_CLUSTER_DOCS": ("min_cluster_docs", int),
+            "MAX_CHUNKS_PER_DOC": ("max_chunks_per_doc", int),
             # Crawler
             "MAX_FILE_DEPTH": ("max_file_depth", int),
             # HTML

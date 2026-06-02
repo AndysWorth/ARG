@@ -478,3 +478,34 @@ def test_index_ignores_links_to_unindexed_targets(indexer, config, kg):
     )
     stats = indexer.index([a])
     assert stats.links_recorded == 0
+
+
+# ---------------------------------------------------------------------------
+# 0-chunk warnings
+# ---------------------------------------------------------------------------
+
+
+def test_zero_chunk_doc_logs_warning(indexer, config, caplog):
+    import logging
+
+    doc = _make_doc(config.docs_root, "empty.html", content="", title="Empty Doc")
+    with caplog.at_level(logging.WARNING, logger="arg.indexer.indexer"):
+        indexer._index_one(doc)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("0 chunks" in m and "empty.html" in m for m in messages)
+
+
+def test_index_summary_zero_chunk_warning(indexer, config, caplog):
+    import logging
+
+    good = _make_doc(
+        config.docs_root,
+        "good.html",
+        content="##H1## Good\nThis document has real content.",
+        title="Good Doc",
+    )
+    empty = _make_doc(config.docs_root, "empty.html", content="", title="Empty Doc")
+    with caplog.at_level(logging.WARNING, logger="arg.indexer.indexer"):
+        indexer.index([good, empty])
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("index complete" in m and "1 doc(s)" in m for m in messages)

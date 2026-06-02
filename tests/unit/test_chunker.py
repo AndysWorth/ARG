@@ -299,3 +299,37 @@ def test_chunk_token_count_populated(tmp_path, base_config):
 def test_empty_document_returns_no_chunks(tmp_path, base_config):
     doc = _doc(tmp_path, "")
     assert chunk_document(doc, base_config) == []
+
+
+# ---------------------------------------------------------------------------
+# Chunk cap (max_chunks_per_doc)
+# ---------------------------------------------------------------------------
+
+
+def test_max_chunks_per_doc_cap(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    # chunk_size=50, overlap=0 → each sliding window is ~50 tokens; 300 words ≈ 5+ chunks
+    config = ARGConfig(docs_root=docs, db_path=tmp_path / "db", chunk_size=50, chunk_overlap=0)
+    config.max_chunks_per_doc = 3
+    long_text = " ".join(f"word{i}" for i in range(300))
+    content = f"##H1## Section\n{long_text}\n"
+    doc = _doc(tmp_path, content)
+    result = chunk_document(doc, config)
+    assert len(result) == 3
+    # Global position counter must be 0, 1, 2 for the retained chunks.
+    positions = [c.metadata["position"] for c in result]
+    assert positions == [0, 1, 2]
+
+
+def test_max_chunks_per_doc_zero_unlimited(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    config = ARGConfig(docs_root=docs, db_path=tmp_path / "db", chunk_size=50, chunk_overlap=0)
+    config.max_chunks_per_doc = 0
+    long_text = " ".join(f"word{i}" for i in range(300))
+    content = f"##H1## Section\n{long_text}\n"
+    doc = _doc(tmp_path, content)
+    result = chunk_document(doc, config)
+    # With no cap, all windows are returned; must be more than 3.
+    assert len(result) > 3

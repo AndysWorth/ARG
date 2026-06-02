@@ -124,6 +124,7 @@ def chunk_document(doc: Document, config: ARGConfig) -> list[ChunkedSection]:
     sections = _split_into_sections(doc.content, title)
     out: list[ChunkedSection] = []
     position = 0  # global across sections — Kuzu orders chunks by this; do not reset per section
+    hit_cap = False
     for section in sections:
         for window_text in _sliding_window(section.text, config):
             chunk_id = f"{doc_id}::chunk::{position}"
@@ -167,6 +168,18 @@ def chunk_document(doc: Document, config: ARGConfig) -> list[ChunkedSection]:
                 )
             )
             position += 1
+            if config.max_chunks_per_doc > 0 and len(out) >= config.max_chunks_per_doc:
+                hit_cap = True
+                break
+        if hit_cap:
+            break
+    if hit_cap:
+        logger.warning(
+            "chunk cap (%d) reached for %s — %d chunks total",
+            config.max_chunks_per_doc,
+            doc.path,
+            len(out),
+        )
     return out
 
 
