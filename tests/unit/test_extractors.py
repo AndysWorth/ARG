@@ -804,13 +804,21 @@ def _heading_font_pdf(path: Path) -> Path:
 
 
 @pytest.mark.pdf
-def test_encrypted_pdf_returns_none(tmp_path, config):
+def test_encrypted_pdf_returns_stub(tmp_path, config):
+    # Contract change (Feature 0006): extract_pdf_to_document no longer returns
+    # None for encrypted PDFs — it returns a stub Document so encrypted files
+    # appear in search results by filename. extract_pdf_metadata and extract_pdf
+    # still return None / [] respectively (they need decrypted content).
     from arg.crawler.extractors import extract_pdf, extract_pdf_metadata, extract_pdf_to_document
 
     pdf = _encrypted_pdf(tmp_path / "encrypted.pdf")
     assert extract_pdf_metadata(pdf, config) is None
-    assert extract_pdf_to_document(pdf, config) is None
     assert list(extract_pdf(pdf, config)) == []
+    stub = extract_pdf_to_document(pdf, config)
+    assert stub is not None
+    assert stub.metadata.get("is_encrypted_stub") is True
+    assert "[Encrypted PDF" in stub.content
+    assert "encrypted.pdf" in stub.content
 
 
 @pytest.mark.pdf
@@ -1099,3 +1107,63 @@ def test_acroform_pdf_skips_pdfplumber(tmp_path, config):
         mock_plumber.assert_not_called()
 
     assert len(pages) >= 1, "AcroForm PDF should still yield pages via pymupdf"
+
+
+# ---------------------------------------------------------------------------
+# Feature 0006: encrypted stub, AcroForm widget extraction
+# ---------------------------------------------------------------------------
+
+
+def test_encrypted_stub_returns_none_for_nonpdf(tmp_path):
+    from arg.crawler.extractors import _make_encrypted_pdf_stub
+
+    txt = tmp_path / "doc.txt"
+    txt.write_text("hello world")
+    # fitz.open succeeds on a text file but doc.is_encrypted is False → None
+    assert _make_encrypted_pdf_stub(txt) is None
+
+
+@pytest.mark.pdf
+def test_encrypted_stub_structure(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    from arg.crawler.extractors import _make_encrypted_pdf_stub
+
+    mock_doc = MagicMock()
+    mock_doc.is_encrypted = True
+    mock_doc.metadata = {"title": "Test Doc", "author": "A. Worth", "creationDate": ""}
+
+    with patch("arg.crawler.extractors.fitz.open", return_value=mock_doc):
+        path = tmp_path / "secret.pdf"
+        path.touch()
+        stub = _make_encrypted_pdf_stub(path)
+
+    assert stub is not None
+    assert stub.metadata.get("is_encrypted_stub") is True
+    assert stub.metadata["title"] == "Test Doc"
+    assert "[Encrypted PDF" in stub.content
+    assert "Author: A. Worth" in stub.content
+
+
+@pytest.mark.pdf
+def test_acroform_widgets_appended_to_page_text(tmp_path, config):
+    """AcroForm field values must appear in the extracted page text."""
+    from arg.crawler.extractors import extract_pdf
+
+    pdf_path = _form_pdf(tmp_path / "form.pdf")
+
+    import pymupdf as fitz
+
+    # Re-open the form PDF and fill in the widget value so it can be read back.
+    doc = fitz.open(str(pdf_path))
+    for page in doc:
+        for widget in page.widgets():
+            widget.field_value = "Andy Worth"
+            widget.update()
+    doc.saveIncr()
+    doc.close()
+
+    pages = list(extract_pdf(pdf_path, config))
+    assert pages, "form PDF should yield at least one page"
+    combined_text = "\n".join(text for _, text, _ in pages)
+    assert "Andy Worth" in combined_text

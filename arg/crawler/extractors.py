@@ -510,6 +510,11 @@ _FITZ_FLAG_BOLD = 1 << 4  # value 16
 _RUNNING_LINE_Y_TOLERANCE_PX = 3.0
 _RUNNING_LINE_MIN_PAGES = 3
 
+# Pages whose OCR output is below this character count are flagged as likely
+# blank or image-only (distinct from ocr_char_threshold, which controls whether
+# OCR *fires*; this threshold flags low-quality OCR *results*).
+_OCR_LOW_QUALITY_CHARS: int = 25
+
 
 # ---- helper: title resolution -----------------------------------------------
 
@@ -976,6 +981,13 @@ def extract_pdf(path: Path, config: ARGConfig) -> Iterator[tuple[int, str, dict[
                 lines, total_chars = _pymupdf_extract_ocr(fitz_page)
                 markdown_tables = []
                 ocr_used = True
+                if total_chars < _OCR_LOW_QUALITY_CHARS:
+                    logger.warning(
+                        "Low OCR quality: page %d of %s yielded only %d chars",
+                        page_index + 1,
+                        path,
+                        total_chars,
+                    )
 
             # Strip running headers/footers
             stripped_lines = [
@@ -993,6 +1005,18 @@ def extract_pdf(path: Path, config: ARGConfig) -> Iterator[tuple[int, str, dict[
             body_text = "\n".join(text for _, text in stripped_lines)
             if markdown_tables:
                 body_text = body_text + "\n" + "\n\n".join(markdown_tables)
+
+            # Step 1d — AcroForm widget field values (form PDFs only)
+            if is_form:
+                widget_parts: list[str] = []
+                for widget in fitz_page.widgets():
+                    label = (widget.field_label or "").strip()
+                    value = str(widget.field_value or "").strip()
+                    if value:
+                        widget_parts.append(f"{label}: {value}" if label else value)
+                if widget_parts:
+                    body_text = (body_text + "\n" + "\n".join(widget_parts)).strip()
+
             body_text = _inject_pdf_heading_sentinels(body_text, sentinel_map)
 
             # Step 3 — text cleaning
@@ -1011,15 +1035,63 @@ def extract_pdf(path: Path, config: ARGConfig) -> Iterator[tuple[int, str, dict[
         doc.close()
 
 
+def _make_encrypted_pdf_stub(path: Path) -> Document | None:
+    """Return a minimal stub Document for a password-protected PDF.
+
+    Opens the file without a password to read XMP metadata only.
+    Returns None if the file is unreadable for a reason other than encryption.
+    """
+    try:
+        doc = fitz.open(path)
+    except Exception:
+        return None
+    if not doc.is_encrypted:
+        doc.close()
+        return None
+    try:
+        meta = dict(doc.metadata or {})
+        title = (meta.get("title") or "").strip() or path.stem
+        parts = [
+            "[Encrypted PDF — content inaccessible]",
+            f"Filename: {path.name}",
+            f"Directory: {path.parent.name}",
+        ]
+        if meta.get("author"):
+            parts.append(f"Author: {meta['author']}")
+        if meta.get("creationDate"):
+            parts.append(f"Creation Date: {meta['creationDate']}")
+    finally:
+        doc.close()
+    return Document(
+        path=path.resolve(),
+        content="\n".join(parts),
+        metadata={
+            "title": title,
+            "page_description": f"Encrypted PDF: {path.name}",
+            "keywords": [],
+            "heading_path": title,
+            "links_to": [],
+            "file_type": "pdf",
+            "code_blocks": [],
+            "page_count": 0,
+            "is_form_pdf": False,
+            "page_metadata": [],
+            "page_offsets": [],
+            "is_encrypted_stub": True,
+        },
+    )
+
+
 def extract_pdf_to_document(path: Path, config: ARGConfig) -> Document | None:
     """Assemble a `Document` for a PDF by consuming `extract_pdf`.
 
-    Returns ``None`` when the PDF is encrypted, corrupt, or otherwise
-    unreadable so the crawler can skip the file silently and continue.
+    Returns ``None`` when the PDF is corrupt or otherwise unreadable.
+    Encrypted PDFs return a minimal stub Document (see `_make_encrypted_pdf_stub`)
+    so they appear in search results by filename.
     """
     meta = extract_pdf_metadata(path, config)
     if meta is None:
-        return None
+        return _make_encrypted_pdf_stub(path)
 
     pages_text: list[str] = []
     per_page_meta: list[dict[str, Any]] = []
