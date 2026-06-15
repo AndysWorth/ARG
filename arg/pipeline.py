@@ -68,6 +68,78 @@ from arg.retriever import HybridRetriever
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Ollama backend adapters
+# ---------------------------------------------------------------------------
+
+
+class _OllamaEmbedder:
+    _START_TOKENS = 256
+
+    def __init__(self, config: ARGConfig, client: Any, model: str, enc: Any) -> None:
+        self._config = config
+        self._client = client
+        self._model = model
+        self._enc = enc
+
+    def embed(self, text: str) -> list[float]:
+        from ollama import ResponseError as _OllamaError
+
+        toks = self._enc.encode(text)
+        if not toks:
+            raise ValueError(f"Cannot embed empty text for model {self._model!r}")
+        limit = min(len(toks), self._START_TOKENS)
+        while True:
+            snippet = self._enc.decode(toks[:limit]) if limit < len(toks) else text
+            try:
+                result = self._client.embed(
+                    model=self._model,
+                    input=snippet,
+                    truncate=True,
+                    options={"num_ctx": self._config.embed_num_ctx},
+                )
+                if not result.embeddings:
+                    raise ValueError(f"Ollama returned empty embeddings for {snippet!r:.80}")
+                return list(result.embeddings[0])
+            except _OllamaError as exc:
+                if exc.status_code != 400 or limit <= 8:
+                    raise
+                limit //= 2
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        batch_size = self._config.embed_batch_size
+        results: list[list[float]] = []
+        for start in range(0, len(texts), batch_size):
+            sub = texts[start : start + batch_size]
+            resp = self._client.embed(
+                model=self._model,
+                input=sub,
+                truncate=True,
+                options={"num_ctx": self._config.embed_num_ctx},
+            )
+            results.extend(list(e) for e in resp.embeddings)
+        return results
+
+
+class _OllamaLLM:
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    def complete(self, prompt: str) -> str:
+        return str(self._client.complete(prompt))
+
+    def complete_structured(self, prompt: str, schema: dict) -> str:
+        return str(self._client.complete(prompt, format=schema))
+
+    def stream_complete(self, prompt: str) -> Iterator[str]:
+        for chunk in self._client.stream_complete(prompt):
+            text = getattr(chunk, "delta", None) or getattr(chunk, "text", "")
+            if text:
+                yield str(text)
+
+
 # Fields whose change should be treated as schema drift. Each one alters the
 # on-disk representation of either the embedding vectors or the chunk text.
 _HASH_FIELDS: tuple[str, ...] = (
@@ -252,11 +324,6 @@ class ARGPipeline:
         """Construct an Ollama embedder pointed at ``config.ollama_base_url``."""
         import tiktoken as _tiktoken
         from ollama import Client as _OllamaClient
-        from ollama import ResponseError as _OllamaError
-
-        _client = _OllamaClient(host=self.config.ollama_base_url)
-        _model = self.config.embed_model
-        _enc = _tiktoken.get_encoding("cl100k_base")
 
         # cl100k is far more compact than nomic-embed-text's byte-level BPE for
         # multi-codepoint emoji (family/flag/skin-tone sequences): cl100k encodes
@@ -265,75 +332,24 @@ class ARGPipeline:
         # tokens and halve on every 400 "context exceeded" response until the
         # call succeeds. For normal text this adds zero round-trips; for
         # pathological content it converges in at most 5 retries.
-        _START_TOKENS = 256
-
-        class _OllamaEmbedderAdapter:
-            def embed(self_inner, text: str) -> list[float]:
-                toks = _enc.encode(text)
-                if not toks:
-                    raise ValueError(f"Cannot embed empty text for model {_model!r}")
-                limit = min(len(toks), _START_TOKENS)
-                while True:
-                    snippet = _enc.decode(toks[:limit]) if limit < len(toks) else text
-                    try:
-                        result = _client.embed(
-                            model=_model,
-                            input=snippet,
-                            truncate=True,
-                            options={"num_ctx": self.config.embed_num_ctx},
-                        )
-                        if not result.embeddings:
-                            raise ValueError(
-                                f"Ollama returned empty embeddings for {snippet!r:.80}"
-                            )
-                        return list(result.embeddings[0])
-                    except _OllamaError as exc:
-                        if exc.status_code != 400 or limit <= 8:
-                            raise
-                        limit //= 2
-
-            def embed_batch(self_inner, texts: list[str]) -> list[list[float]]:
-                if not texts:
-                    return []
-                batch_size = self.config.embed_batch_size
-                results: list[list[float]] = []
-                for start in range(0, len(texts), batch_size):
-                    sub = texts[start : start + batch_size]
-                    resp = _client.embed(
-                        model=_model,
-                        input=sub,
-                        truncate=True,
-                        options={"num_ctx": self.config.embed_num_ctx},
-                    )
-                    results.extend(list(e) for e in resp.embeddings)
-                return results
-
-        return _OllamaEmbedderAdapter()
+        return _OllamaEmbedder(
+            config=self.config,
+            client=_OllamaClient(host=self.config.ollama_base_url),
+            model=self.config.embed_model,
+            enc=_tiktoken.get_encoding("cl100k_base"),
+        )
 
     def _default_llm(self) -> LLM:
         """Construct an Ollama LLM pointed at ``config.ollama_base_url``."""
         from llama_index.llms.ollama import Ollama
 
-        client = Ollama(
-            model=self.config.llm_model,
-            base_url=self.config.ollama_base_url,
-            request_timeout=self.config.ollama_timeout,
+        return _OllamaLLM(
+            client=Ollama(
+                model=self.config.llm_model,
+                base_url=self.config.ollama_base_url,
+                request_timeout=self.config.ollama_timeout,
+            )
         )
-
-        class _OllamaLLMAdapter:
-            def complete(self_inner, prompt: str) -> str:
-                return str(client.complete(prompt))
-
-            def complete_structured(self_inner, prompt: str, schema: dict) -> str:
-                return str(client.complete(prompt, format=schema))
-
-            def stream_complete(self_inner, prompt: str) -> Iterator[str]:
-                for chunk in client.stream_complete(prompt):
-                    text = getattr(chunk, "delta", None) or getattr(chunk, "text", "")
-                    if text:
-                        yield str(text)
-
-        return _OllamaLLMAdapter()
 
     # ------------------------------------------------------------------
     # Indexing

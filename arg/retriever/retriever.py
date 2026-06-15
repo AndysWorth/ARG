@@ -148,7 +148,7 @@ class HybridRetriever:
         if enrich and self.config.enrich_enabled:
             candidate_doc_ids = self._stage0_enrichment(query)
 
-        chroma_filters = self._chroma_where(filters) if filters else None
+        chroma_filters = dict(filters) if filters else None
 
         # Stage 1 — dense.
         dense_hits = self._stage1_dense(
@@ -490,7 +490,7 @@ class HybridRetriever:
         filters: dict[str, Any],
     ) -> list[NodeWithScore]:
         chroma_filters = _combine_where(
-            self._chroma_where(filters) if filters else None,
+            dict(filters) if filters else None,
             {"doc_id": scope_doc_id},
         )
         dense = self._stage1_dense(
@@ -507,22 +507,6 @@ class HybridRetriever:
         )
         fused = _rrf_fuse({"dense": dense, "bm25": bm25, "graph": []})
         return _lost_in_middle_reorder(fused, target_n=self.config.top_k_vector)
-
-    # ------------------------------------------------------------------
-    # Filter helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _chroma_where(filters: dict[str, Any]) -> dict[str, Any]:
-        """Translate a simple ``{key: value}`` filter dict into Chroma's where syntax.
-
-        Pass-through for values that are already Chroma-shaped (``{"$contains": ...}``,
-        ``{"$in": [...]}``).
-        """
-        out: dict[str, Any] = {}
-        for key, val in filters.items():
-            out[key] = val
-        return out
 
 
 # ---------------------------------------------------------------------------

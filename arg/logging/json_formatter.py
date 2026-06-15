@@ -112,12 +112,8 @@ def configure_logging(
 
     rotator = RotatingFileHandler(
         str(log_path),
-        maxBytes=int(config.__dict__.get("log_max_bytes", 10_485_760))
-        if hasattr(config, "log_max_bytes")
-        else 10_485_760,
-        backupCount=int(config.__dict__.get("log_backup_count", 5))
-        if hasattr(config, "log_backup_count")
-        else 5,
+        maxBytes=10_485_760,
+        backupCount=5,
         encoding="utf-8",
     )
     rotator.setFormatter(JsonFormatter())

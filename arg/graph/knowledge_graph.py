@@ -343,13 +343,14 @@ class KnowledgeGraph:
         ]
 
     def list_documents_by_chunk_count(
-        self, limit: int = 0, offset: int = 0
+        self, limit: int = 0, offset: int = 0, descending: bool = True
     ) -> list[dict[str, Any]]:
-        """Documents ordered by chunk_count DESC with server-side pagination."""
+        """Documents ordered by chunk_count with server-side pagination."""
+        direction = "DESC" if descending else "ASC"
         query = (
             "MATCH (d:Document) "
             "RETURN d.doc_id, d.title, d.chunk_count "
-            "ORDER BY d.chunk_count DESC, d.doc_id ASC"
+            f"ORDER BY d.chunk_count {direction}, d.doc_id ASC"
         )
         if offset > 0:
             query += f" SKIP {int(offset)}"
