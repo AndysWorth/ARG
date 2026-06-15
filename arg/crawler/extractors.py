@@ -240,7 +240,7 @@ def _strip_invisible_and_boilerplate(soup: BeautifulSoup, config: ARGConfig) -> 
     # Malformed HTML can surface nodes from ``find_all(attrs=...)`` where
     # ``.attrs is None`` — calling ``.get()`` on them raises AttributeError
     # mid-iteration. Guard with isinstance + attrs presence.
-    for tag in soup.find_all(attrs={"style": True}):
+    for tag in soup.find_all(style=True):
         if not isinstance(tag, Tag) or tag.attrs is None:
             continue
         style = tag.get("style", "")
