@@ -68,7 +68,7 @@ class ARGConfig:
     db_path: Path
 
     # --- Models -----------------------------------------------------------
-    llm_model: str = "qwen3.6:35b-a3b-q4_K_M"
+    llm_model: str = "gemma4:26b-mlx"
     embed_model: str = "nomic-embed-text"
     ollama_base_url: str = "http://localhost:11434"
     ollama_timeout: float = 300.0
