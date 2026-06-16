@@ -66,7 +66,7 @@ def test_defaults_applied(paths):
 
     docs, db = paths
     cfg = ARGConfig(docs_root=docs, db_path=db)
-    assert cfg.llm_model == "qwen3.6:35b-a3b-q4_K_M"
+    assert cfg.llm_model == "gemma4:26b-mlx"
     assert cfg.embed_model == "nomic-embed-text"
     assert cfg.ollama_base_url == "http://localhost:11434"
     assert cfg.chunk_size == 1024
